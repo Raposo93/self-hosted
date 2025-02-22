@@ -1,37 +1,35 @@
-version: '3.9'
-
 services:
   traefik:
-    image: "traefik:v3.0.0"
-    container_name: "traefik"
+    image: traefik:v3.3.3
+    container_name: traefik
+    init: true
     restart: unless-stopped
-    command:
-      - "--accesslog"
-      - "--accesslog.filepath=/var/log/traefik/access.log"
-      - "--api.insecure=true"
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      - "--entrypoints.web.address=:80"
-      - "--entrypoints.websecure.address=:443"
-      # Configuración de Let's Encrypt
-      - "--certificatesresolvers.letsencrypt.acme.email=gonzalorave7@gmail.com"
-      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
-      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
-      # Aumenta el nivel de logs para depurar
-      - "--log.level=INFO"
-    volumes:
-      - "/var/run/docker.sock:/var/run/docker.sock:ro"
-      - "logs:/var/log/traefik"
-      - "./acme.json:/letsencrypt/acme.json"
-    ports:
-      - "80:80"
-      - "443:443"
-      - "8080:8080"
+    security_opt:
+      - no-new-privileges:true
     networks:
       - proxy
+    ports:
+      - 80:80
+      - 443:443
+    environment:
+      - TZ=Europe/Madrid
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik.yml:/traefik.yml:ro
+      - ./dynamic.yml:/dynamic.yml:ro
+      - ./users.txt:/users.txt:ro
+      - ./acme.json:/acme.json
+      - logs:/var/log/traefik
+    labels:
+      - traefik.enable=true
+      - traefik.http.services.traefik.loadbalancer.server.port=80
+      - traefik.http.routers.traefik-secure.entrypoints=web #SOLO EXPONGO MI DASHBOARD A LAN
+      - traefik.http.routers.traefik-secure.rule=Host(`${FQDN}`)
+      - traefik.http.routers.traefik-secure.middlewares=myauth@file
+      - traefik.http.routers.traefik-secure.service=api@internal
 
 volumes:
-  logs:
+  logs: {}
 
 networks:
   proxy:
