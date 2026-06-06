@@ -1,0 +1,15 @@
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin
+    user: "1000:1000"
+    network_mode: bridge
+    ports:
+      - "0.0.0.0:8096:8096"
+    volumes:
+      - /media/gonzalo/r/plex:/media
+      - ./cache:/cache/
+      - ./config:/config
+    restart: unless-stopped
+    environment:
+      - TZ=Europe/Madrid
