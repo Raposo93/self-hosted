@@ -1,6 +1,0 @@
-name: crowdsecurity/whitelists
-description: "Whitelist events from my ip addresses"
-whitelist:
-  reason: "my ip ranges"
-  ip:
-    - "10.1.1.1"
