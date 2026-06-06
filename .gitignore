@@ -7,3 +7,24 @@ config/
 # Local service database data
 paperless-ngx/db/
 wikijs/db-data/
+
+# Environment files
+**/.env
+**/.db.env
+
+# Logs
+*.log
+
+# Service runtime data
+firefly/firefly_iii_db/
+jellyfin/cache/
+jellyfin/config/
+paperless-ngx/data/
+paperless-ngx/db/
+paperless-ngx/media/
+vikunja/db/
+vikunja/files/
+wikijs/db-data/
+
+# App-generated local config
+filebrowser/filebrowser_config/
