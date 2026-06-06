@@ -1,0 +1,48 @@
+services:
+  paperless-redis:
+    image: docker.io/library/redis:7
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+
+  paperless-db:
+    image: docker.io/library/postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ${PAPERLESS_DB_DIR}:/var/lib/postgresql/data
+
+  paperless-webserver:
+    image: ghcr.io/paperless-ngx/paperless-ngx:latest
+    restart: unless-stopped
+    depends_on:
+      - paperless-db
+      - paperless-redis
+    ports:
+      - "${PAPERLESS_PORT}:8000"
+    environment:
+      PAPERLESS_REDIS: redis://paperless-redis:6379
+      PAPERLESS_DBHOST: paperless-db
+      PAPERLESS_DBNAME: ${POSTGRES_DB}
+      PAPERLESS_DBUSER: ${POSTGRES_USER}
+      PAPERLESS_DBPASS: ${POSTGRES_PASSWORD}
+      PAPERLESS_TIME_ZONE: ${TZ}
+      PAPERLESS_OCR_LANGUAGES: ${OCR_LANGUAGES}
+      PAPERLESS_CONSUMPTION_DIR: /consume
+      PAPERLESS_DATA_DIR: /usr/src/paperless/data
+      PAPERLESS_MEDIA_ROOT: /usr/src/paperless/media
+      PAPERLESS_ENABLE_HTTP_REMOTE_USER: "false"
+      PAPERLESS_OCR_MAX_IMAGE_PIXELS: 1000000000
+      PAPERLESS_TASK_WORKERS: 1
+      PAPERLESS_CONSUMER_POLLING: 60  # escanea nuevos documentos cada 60s
+      PAPERLESS_CONSUMER_DELETE: "false"  # <<< NO BORRAR originales
+    volumes:
+      - ${PAPERLESS_CONSUME_DIR}:/consume
+      - ${PAPERLESS_DATA_DIR}:/usr/src/paperless/data
+      - ${PAPERLESS_MEDIA_DIR}:/usr/src/paperless/media
+
+volumes:
+  redisdata:
