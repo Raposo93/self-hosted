@@ -1,0 +1,42 @@
+services:
+  mariadb:
+    image: mariadb:10
+    container_name: vikunja_db
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: $MYSQLROOTPWD
+      MYSQL_USER: $VIKDBUSR
+      MYSQL_PASSWORD: $VIKDBPWD
+      MYSQL_DATABASE: $VIKDBNAME
+    volumes:
+      - $DOCKERDIR/vikunja/db:/var/lib/mysql
+    restart: unless-stopped
+
+  api:
+    image: vikunja/vikunja
+    container_name: vikunja_api
+    environment:
+      VIKUNJA_DATABASE_HOST: vikunja_db
+      VIKUNJA_DATABASE_PASSWORD: $VIKDBPWD
+      VIKUNJA_DATABASE_TYPE: mysql
+      VIKUNJA_DATABASE_USER: $VIKDBUSR
+      VIKUNJA_DATABASE_DATABASE: $VIKDBNAME
+      VIKUNJA_SERVICE_PUBLICURL: $VIKDOMAIN
+      VIKUNJA_SERVICE_ENABLEREGISTRATION: 0
+      VIKUNJA_MIGRATION_WUNDERLIST_ENABLE: 1
+      VIKUNJA_MIGRATION_TODOIST_ENABLE: 1
+      VIKUNJA_SERVICE_ENABLEEMAILREMINDERS: 1
+      VIKUNJA_MAILER_ENABLED: 1
+      VIKUNJA_MAILER_HOST: $MAILHOST
+      VIKUNJA_MAILER_PORT: $MAILPORT
+      VIKUNJA_MAILER_USERNAME: $MAILUSER
+      VIKUNJA_MAILER_PASSWORD: $MAILPASS
+      VIKUNJA_MAILER_FROMEMAIL: $MAILFROM
+      VIKUNJA_MAILER_FORCESSL: 0
+    ports:
+      - 3456:3456
+    volumes:
+      - $DOCKERDIR/vikunja/files:/app/vikunja/files
+    depends_on:
+      - mariadb
+    restart: unless-stopped
