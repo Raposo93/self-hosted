@@ -28,3 +28,7 @@ wikijs/db-data/
 
 # App-generated local config
 filebrowser/filebrowser_config/
+
+# Nested Vikunja runtime data
+vikunja/vikunja/db/
+vikunja/vikunja/files/
