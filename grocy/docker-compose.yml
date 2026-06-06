@@ -1,0 +1,13 @@
+services:
+  grocy:
+    image: ghcr.io/linuxserver/grocy
+    container_name: grocy
+    environment:
+      - PUID=1000         # Cambia esto por el UID de tu usuario si usas Linux
+      - PGID=1000         # Cambia esto por tu GID
+      - TZ=Europe/Madrid  # Ajusta a tu zona horaria
+    volumes:
+      - ./grocy/config:/config
+    ports:
+      - 9283:80
+    restart: unless-stopped
