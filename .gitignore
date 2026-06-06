@@ -3,3 +3,7 @@
 **/acme.json
 # qBittorrent runtime data
 config/
+
+# Local service database data
+paperless-ngx/db/
+wikijs/db-data/
