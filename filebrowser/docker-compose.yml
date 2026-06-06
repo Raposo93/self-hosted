@@ -1,0 +1,13 @@
+services:
+  filebrowser:
+    image: filebrowser/filebrowser:latest
+    container_name: filebrowser
+    restart: unless-stopped
+    user: "1000:1000"
+    ports:
+      - "8089:80"
+    volumes:
+      - /media/gonzalo/r/filebrowser-data:/srv
+      - ./filebrowser_config:/config
+    environment:
+      - FB_BASEURL=/
