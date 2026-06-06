@@ -1,0 +1,40 @@
+services:
+  app:
+    image: fireflyiii/core:latest
+    hostname: app
+    container_name: firefly
+    restart: always
+    volumes:
+      - ./firefly_iii_upload:/var/www/html/storage/upload:rw
+    env_file: .env
+    ports:
+      - "0.0.0.0:4534:8080"
+    networks:
+      - firefly_iii
+
+  db:
+    image: mariadb:lts
+    hostname: db
+    container_name: firefly_iii_db
+    restart: always
+    env_file: .db.env
+    volumes:
+      - ./firefly_iii_db:/var/lib/mysql:rw
+    networks:
+      - firefly_iii
+
+  cron:
+    image: alpine
+    restart: always
+    container_name: firefly_iii_cron
+    command: sh -c "echo \"0 3 * * * wget -qO- http://app:8080/api/v1/cron/REPLACEME\" | crontab - && crond -f -L /dev/stdout"
+    networks:
+      - firefly_iii
+
+volumes:
+  firefly_iii_upload:
+  firefly_iii_db:
+
+networks:
+  firefly_iii:
+    driver: bridge
