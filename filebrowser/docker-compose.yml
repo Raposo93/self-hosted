@@ -7,7 +7,7 @@ services:
     ports:
       - "8089:80"
     volumes:
-      - /media/gonzalo/r/filebrowser-data:/srv
+      - ${DATA_DIR}:/srv
       - ./filebrowser_config:/config
     environment:
       - FB_BASEURL=/
