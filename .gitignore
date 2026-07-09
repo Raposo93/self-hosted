@@ -1,19 +1,12 @@
-**/*.log
-**/.env
-**/acme.json
-# qBittorrent runtime data
-config/
-
-# Local service database data
-paperless-ngx/db/
-wikijs/db-data/
-
 # Environment files
-**/.env
-**/.db.env
+.env
+.db.env
 
 # Logs
 *.log
+
+# ACME / reverse proxy runtime files
+acme.json
 
 # Service runtime data
 firefly/firefly_iii_db/
@@ -22,13 +15,18 @@ jellyfin/config/
 paperless-ngx/data/
 paperless-ngx/db/
 paperless-ngx/media/
+paperless-ngx/originals/
 vikunja/db/
 vikunja/files/
 wikijs/db-data/
 
 # App-generated local config
 filebrowser/filebrowser_config/
+qBittorrent-nox/config/
+qBittorrent-nox/downloads/
+qBittorrent-nox/torrents/
+grocy/grocy/config
 
-# Nested Vikunja runtime data
+# Nested runtime data
 vikunja/vikunja/db/
 vikunja/vikunja/files/
