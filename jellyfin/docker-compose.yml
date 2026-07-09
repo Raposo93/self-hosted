@@ -7,7 +7,7 @@ services:
     ports:
       - "0.0.0.0:8096:8096"
     volumes:
-      - /media/gonzalo/r/plex:/media
+      - "${MEDIA_DIR}:/media"
       - ./cache:/cache/
       - ./config:/config
     restart: unless-stopped
