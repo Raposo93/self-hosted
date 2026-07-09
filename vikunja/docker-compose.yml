@@ -9,7 +9,7 @@ services:
       MYSQL_PASSWORD: $VIKDBPWD
       MYSQL_DATABASE: $VIKDBNAME
     volumes:
-      - $DOCKERDIR/vikunja/db:/var/lib/mysql
+      - "${DATA_DIR}:/var/lib/mysql"
     restart: unless-stopped
 
   api:
