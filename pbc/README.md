@@ -245,7 +245,7 @@ Run the command from this directory or source the environment file with an absol
 Example:
 
 ```bash
-source /home/gonzalo/self-hosted/pbc/.env
+source /home/user/self-hosted/pbc/.env
 ```
 
 ### `msmtp: no recipients found`
