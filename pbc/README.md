@@ -9,7 +9,7 @@ This directory contains a reusable script for backing up a local directory to a 
 | File | Purpose |
 | --- | --- |
 | `pbc_backup_data.sh` | Runs the backup with Proxmox Backup Client |
-| `sample.env` | Example environment configuration |
+| `.env.example` | Example environment configuration |
 | `.env` | Local configuration file, not committed |
 
 ## Requirements
@@ -22,10 +22,10 @@ This directory contains a reusable script for backing up a local directory to a 
 
 ## Setup
 
-Copy the sample environment file:
+Copy the example environment file:
 
 ```bash
-cp sample.env .env
+cp .env.example .env
 ```
 
 Edit `.env` with the local values:
