@@ -19,7 +19,8 @@ logging.basicConfig(
 )
 log = logging.getLogger()
 
-load_dotenv()
+env_file = Path(__file__).with_name(".env")
+load_dotenv(env_file)
 domains_str = os.getenv("DOMAINS", "[]")
 try:
     domains = json.loads(domains_str)
@@ -94,7 +95,7 @@ for domain in domains:
             pem_bytes = f1.read() + f2.read()
         
         subprocess.run(
-            ["sudo", "tee", cert_dest],
+            ["tee", cert_dest],
             input=pem_bytes,
             check=True,
             stdout=subprocess.DEVNULL,
@@ -108,7 +109,7 @@ for domain in domains:
 if haproxy_needs_reload:
     try:
         reload_result = subprocess.run(
-            ["sudo", "systemctl", "reload", "haproxy"],
+            ["systemctl", "reload", "haproxy"],
             check=True,
             capture_output=True,
             text=True,
