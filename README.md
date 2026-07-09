@@ -6,19 +6,19 @@ This repository contains Docker Compose setups and helper scripts used to run an
 
 ## Contents
 
-| Path                         | Purpose                               |
-| ---------------------------- | ------------------------------------- |
-| `filebrowser/`               | File Browser deployment               |
-| `firefly/`                   | Firefly III deployment                |
-| `grocy/`                     | Grocy deployment                      |
-| `jellyfin/`                  | Jellyfin deployment                   |
-| `navidrome/`                 | Navidrome deployment                  |
-| `paperless-ngx/`             | Paperless-ngx deployment              |
-| `qBittorrent-nox/`           | qBittorrent-nox deployment            |
-| `vikunja/`                   | Vikunja deployment and helper scripts |
-| `wikijs/`                    | Wiki.js deployment                    |
-| `acme_cerificate_installer/` | ACME certificate installation helper  |
-| `pbc/`                       | Proxmox Backup Client scripts         |
+| Path                          | Purpose                               |
+| ----------------------------- | ------------------------------------- |
+| `filebrowser/`                | File Browser deployment               |
+| `firefly/`                    | Firefly III deployment                |
+| `grocy/`                      | Grocy deployment                      |
+| `jellyfin/`                   | Jellyfin deployment                   |
+| `navidrome/`                  | Navidrome deployment                  |
+| `paperless-ngx/`              | Paperless-ngx deployment              |
+| `qBittorrent-nox/`            | qBittorrent-nox deployment            |
+| `vikunja/`                    | Vikunja deployment and helper scripts |
+| `wikijs/`                     | Wiki.js deployment                    |
+| `acme_certificate_installer/` | ACME certificate installation helper  |
+| `pbc/`                        | Proxmox Backup Client scripts         |
 
 ## Repository conventions
 
@@ -29,7 +29,7 @@ Most services are configured through local environment files or service-specific
 Example:
 
 ```bash
-cp sample.env .env
+cp .env.example .env
 ```
 
 ## Security notes
@@ -72,7 +72,7 @@ Some scripts may require root permissions, systemd, local credentials or extra c
 
 Backup-related scripts live under `pbc/`.
 
-Review `pbc/sample.env`, copy it to `.env`, adapt the values and keep `.env` untracked.
+Review `pbc/.env.example`, copy it to `.env`, adapt the values and keep `.env` untracked.
 
 ## Notes
 
