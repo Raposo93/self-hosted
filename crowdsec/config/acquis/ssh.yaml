@@ -1,5 +1,0 @@
-filenames:
-   - /logs/auth.log
-   - /logs/syslog
-labels:
-    type: syslog
