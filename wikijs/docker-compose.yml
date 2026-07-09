@@ -31,4 +31,4 @@ volumes:
    driver_opts:
      type: none
      o: bind
-     device: ${DOCKERDIR}/wikijs/db-data
+     device: ${DATA_DIR}
