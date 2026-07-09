@@ -3,11 +3,11 @@ services:
     image: ghcr.io/linuxserver/grocy
     container_name: grocy
     environment:
-      - PUID={PUID}
-      - PGID={PGID}
-      - TZ={TZ}
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
     volumes:
-      - {GROCY_CONFIG_DIR}:/config
+      - ${GROCY_CONFIG_DIR}:/config
     ports:
-      - {GROCY_PORT}:80
+      - ${GROCY_PORT}:80
     restart: unless-stopped
