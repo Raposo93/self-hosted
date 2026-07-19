@@ -16,6 +16,14 @@ if [[ ! -r "$ENV_FILE" ]]; then
     exit 1
 fi
 
+REPO_DIR="$(dirname -- "$SCRIPT_DIR")"
+SEND_MAIL="$REPO_DIR/mail-notifier/send-mail.sh"
+
+if [[ ! -x "$SEND_MAIL" ]]; then
+    echo "Error: Mail notifier not found or not executable: $SEND_MAIL" >&2
+    exit 1
+fi
+
 set -a
 source "$ENV_FILE"
 set +a
@@ -80,13 +88,12 @@ else
     SUBJECT="✅ Backup completed: $BACKUP_NAME on $HOSTNAME"
 fi
 
-if ! msmtp -a "$MSMTP_ACCOUNT" "$RECIPIENT_EMAIL" <<EOF
-From: $SENDER_EMAIL
-To: $RECIPIENT_EMAIL
-Subject: $SUBJECT
-
-$(cat "$LOGFILE")
-EOF
+if ! "$SEND_MAIL" \
+    --account "$MSMTP_ACCOUNT" \
+    --from "$SENDER_EMAIL" \
+    --to "$RECIPIENT_EMAIL" \
+    --subject "$SUBJECT" \
+    < "$LOGFILE"
 then
     log "Warning: Failed to send notification email"
 fi
