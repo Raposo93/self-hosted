@@ -2,6 +2,12 @@
 
 set -Eeuo pipefail
 
+LOG_TAG="shutdown-delayed"
+
+log() {
+    logger -t "$LOG_TAG" -- "$*"
+}
+
 if [[ "$EUID" -ne 0 ]]; then
     echo "Error: This script must be run as root." >&2
     exit 1
@@ -58,6 +64,8 @@ if [[ ! -S "$DBUS_SOCKET" ]]; then
     exit 1
 fi
 
+log "Starting shutdown warning: user=$USER_NAME delay=${MINUTES}m display=$WAYLAND_DISPLAY"
+
 runuser -u "$USER_NAME" -- env \
   XDG_RUNTIME_DIR="$RUNTIME_DIR" \
   WAYLAND_DISPLAY="$WAYLAND_DISPLAY" \
@@ -83,13 +91,19 @@ YAD_PID=$!
 
 DELAY_SECONDS=$((MINUTES * 60))
 CHECK_SECONDS=3
+
 sleep "$CHECK_SECONDS"
 
 if ! kill -0 "$YAD_PID" 2>/dev/null; then
+    log "Failed to display shutdown warning: user=$USER_NAME"
     echo "Error: Failed to display the shutdown warning." >&2
     wait "$YAD_PID" 2>/dev/null || true
     exit 1
 fi
 
+log "Shutdown warning displayed: user=$USER_NAME pid=$YAD_PID"
+
 sleep "$((DELAY_SECONDS - CHECK_SECONDS))"
+
+log "Shutdown delay elapsed; powering off system"
 systemctl poweroff
