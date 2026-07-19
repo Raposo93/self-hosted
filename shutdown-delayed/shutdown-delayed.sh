@@ -79,6 +79,17 @@ runuser -u "$USER_NAME" -- env \
     --skip-taskbar \
     --timeout="$((MINUTES * 60))" \
     --timeout-indicator=bottom &
+YAD_PID=$!
 
-sleep "${MINUTES}m"
+DELAY_SECONDS=$((MINUTES * 60))
+CHECK_SECONDS=3
+sleep "$CHECK_SECONDS"
+
+if ! kill -0 "$YAD_PID" 2>/dev/null; then
+    echo "Error: Failed to display the shutdown warning." >&2
+    wait "$YAD_PID" 2>/dev/null || true
+    exit 1
+fi
+
+sleep "$((DELAY_SECONDS - CHECK_SECONDS))"
 systemctl poweroff
