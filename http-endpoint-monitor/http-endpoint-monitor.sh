@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 
-set -u
+set -Eeuo pipefail
 
 usage() {
     cat <<'EOF'
 Usage:
-  http-endpoint-monitor.sh --name NAME --url URL --email-alert ADDRESS [OPTIONS]
+  http-endpoint-monitor.sh --name NAME --url URL \
+    --email-alert ADDRESS --account NAME --from ADDRESS
 
 Options:
   -n, --name NAME           monitor name
@@ -14,7 +15,6 @@ Options:
   -a, --account NAME        msmtp account
   -f, --from ADDRESS        sender address
   -h, --help                show this help
-
 EOF
 }
 
@@ -79,11 +79,6 @@ while (($# > 0)); do
         -h|--help)
             usage
             exit 0
-            ;;
-
-        --)
-            shift
-            break
             ;;
 
         -*)
@@ -163,15 +158,21 @@ log_message() {
 send_alert() {
     local message="$1"
     local subject="HTTP monitor: ${NAME}"
-    
-    logger -p user.warning -t http-monitor "$message"
 
-    printf '%s\n' "$message" |
-            "$SEND_MAIL" \
-                --account "$ACCOUNT" \
-                --from "$FROM" \
-                --to "$ALERT_EMAIL" \
-                --subject "$subject"
+    if ! logger -p user.warning -t http-monitor "$message"; then
+        log_message "WARNING failed to write alert to system log"
+    fi
+
+    if ! printf '%s\n' "$message" |
+        "$SEND_MAIL" \
+            --account "$ACCOUNT" \
+            --from "$FROM" \
+            --to "$ALERT_EMAIL" \
+            --subject "$subject"
+    then
+        log_message "WARNING failed to send email alert"
+        return 0
+    fi
 }
 
 previous_state="UNKNOWN"
@@ -185,7 +186,13 @@ fi
 
 error_file="$(mktemp)"
 
-result="$(
+cleanup() {
+    rm -f -- "$error_file"
+}
+
+trap cleanup EXIT
+
+if result="$(
     curl \
         --location \
         --silent \
@@ -195,11 +202,13 @@ result="$(
         --connect-timeout "$CONNECT_TIMEOUT" \
         --max-time "$MAX_TIME" \
         "$URL" 2>"$error_file"
-)"
-curl_result=$?
+)"; then
+    curl_result=0
+else
+    curl_result=$?
+fi
 
 curl_error="$(tr '\n' ' ' < "$error_file")"
-rm -f "$error_file"
 
 http_code="${result%%|*}"
 response_time="${result#*|}"
