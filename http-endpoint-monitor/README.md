@@ -26,10 +26,24 @@ The following commands must be available:
 * `flock`
 * `logger`
 * `mktemp`
+* `msmtp`, required by `mail-notifier/send-mail.sh`, with the account
+  passed to `--account` already configured
 
-Email notifications additionally require:
+The monitor also requires the shared mail notifier to exist and be executable:
 
-* `msmtp`
+```text
+mail-notifier/send-mail.sh
+```
+
+Both directories must share the same parent directory. The following structure is required:
+
+```text
+repository/
+├── http-endpoint-monitor/
+│   └── http-endpoint-monitor.sh
+└── mail-notifier/
+    └── send-mail.sh
+```
 
 ## Configuration
 
@@ -39,27 +53,36 @@ Edit the constants near the beginning of the script:
 FAIL_LIMIT=3
 CONNECT_TIMEOUT=5
 MAX_TIME=15
-ALERT_EMAIL="alerts@example.com"
 ```
-
-Email sender details are currently configured inside `send_alert()`:
-
-```bash
-local from="monitor@example.com"
-```
-
-Make sure `msmtp` is configured for the user that runs the script.
 
 ## Usage
 
+For help:
+
 ```bash
-./http-endpoint-monitor.sh <name> <url>
+./http-endpoint-monitor.sh --help
+```
+
+Run a monitor with:
+
+```bash
+./http-endpoint-monitor.sh \
+    --name NAME \
+    --url URL \
+    --account MSMTP_ACCOUNT \
+    --from SENDER_ADDRESS \
+    --email-alert RECIPIENT_ADDRESS
 ```
 
 Example:
 
 ```bash
-./http-endpoint-monitor.sh immich https://photos.example.com
+./http-endpoint-monitor.sh \
+    --name navidrome \
+    --url https://navidrome.example.com \
+    --account mailjet \
+    --from alerts@example.com \
+    --email-alert admin@example.com
 ```
 
 The monitor name may only contain:
@@ -82,8 +105,19 @@ Run the script once for each endpoint.
 Example:
 
 ```bash
-./http-endpoint-monitor.sh immich https://photos.example.com
-./http-endpoint-monitor.sh blueiris https://cameras.example.com
+./http-endpoint-monitor.sh \
+    --name immich \
+    --url https://photos.example.com \
+    --account mailjet \
+    --from alerts@example.com \
+    --email-alert admin@example.com
+
+./http-endpoint-monitor.sh \
+    --name blueiris \
+    --url https://cameras.example.com \
+    --account mailjet \
+    --from alerts@example.com \
+    --email-alert admin@example.com
 ```
 
 Each endpoint keeps an independent failure count and state.
@@ -93,8 +127,8 @@ Each endpoint keeps an independent failure count and state.
 Run two checks every five minutes:
 
 ```cron
-*/5 * * * * /path/to/http-endpoint-monitor.sh immich https://photos.example.com
-*/5 * * * * /path/to/http-endpoint-monitor.sh blueiris https://cameras.example.com
+*/5 * * * * /path/to/http-endpoint-monitor.sh --name immich --url https://photos.example.com --account mailjet --from alerts@example.com --email-alert admin@example.com
+*/5 * * * * /path/to/http-endpoint-monitor.sh --name blueiris --url https://cameras.example.com --account mailjet --from alerts@example.com --email-alert admin@example.com
 ```
 
 Use absolute paths when running the script from cron.
@@ -175,7 +209,8 @@ The endpoint name is included in every log entry:
 
 ```text
 0  Check completed, or another check for the same endpoint is already running
-2  Invalid arguments, monitor name, or URL
+1  Shared mail notifier is missing or not executable
+2  Invalid or missing command-line arguments
 ```
 
 HTTP and connection failures are recorded in the state and log files. They do not currently cause the script itself to return a non-zero exit code.
@@ -189,10 +224,13 @@ The script sends notifications only on state transitions:
 
 A single temporary failure does not send an email unless it reaches the configured failure limit.
 
-If `msmtp` is unavailable or `ALERT_EMAIL` is empty, no email is sent.
+The recipient address, sender address, and msmtp account are required.
+
+The script delegates email delivery to `mail-notifier/send-mail.sh`, and the
+selected msmtp account must already be configured.
 
 Alerts are also written to the system log using:
 
 ```bash
-logger -p user.warning -t http-endpoint-monitor
+logger -p user.warning -t http-monitor
 ```

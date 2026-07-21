@@ -2,13 +2,103 @@
 
 set -u
 
-if (( $# != 2 )); then
-    echo "Usage: $0 <name> <url>" >&2
-    exit 2
-fi
+usage() {
+    cat <<'EOF'
+Usage:
+  http-endpoint-monitor.sh --name NAME --url URL --email-alert ADDRESS [OPTIONS]
 
-NAME="$1"
-URL="$2"
+Options:
+  -n, --name NAME           monitor name
+  -u, --url URL             URL to monitor
+  -e, --email-alert ADDRESS recipient address
+  -a, --account NAME        msmtp account
+  -f, --from ADDRESS        sender address
+  -h, --help                show this help
+
+EOF
+}
+
+NAME=""
+URL=""
+ACCOUNT=""
+FROM=""
+ALERT_EMAIL=""
+
+while (($# > 0)); do
+    case "$1" in
+        -a|--account)
+            [[ $# -ge 2 ]] || {
+                echo "Error: $1 requires a value." >&2
+                exit 2
+            }
+
+            ACCOUNT="$2"
+            shift 2
+            ;;
+        
+        -n|--name)
+            [[ $# -ge 2 ]] || {
+                echo "Error: $1 requires a value." >&2
+                exit 2
+            }
+
+            NAME="$2"
+            shift 2
+            ;;
+
+        -u|--url)
+            [[ $# -ge 2 ]] || {
+                echo "Error: $1 requires a value." >&2
+                exit 2
+            }
+
+            URL="$2"
+            shift 2
+            ;;
+
+        -f|--from)
+            [[ $# -ge 2 ]] || {
+                echo "Error: $1 requires a value." >&2
+                exit 2
+            }
+
+            FROM="$2"
+            shift 2
+            ;;
+
+        -e|--email-alert)
+            [[ $# -ge 2 ]] || {
+                echo "Error: $1 requires a value." >&2
+                exit 2
+            }
+
+            ALERT_EMAIL="$2"
+            shift 2
+            ;;
+
+        -h|--help)
+            usage
+            exit 0
+            ;;
+
+        --)
+            shift
+            break
+            ;;
+
+        -*)
+            echo "Error: Unknown option: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+
+        *)
+            echo "Error: Unexpected argument: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
 
 if [[ ! "$NAME" =~ ^[a-zA-Z0-9._-]+$ ]]; then
     echo "Error: Invalid monitor name: $NAME." >&2
@@ -21,15 +111,37 @@ if [[ ! "$URL" =~ ^https?:// ]]; then
     exit 2
 fi
 
+[[ -n "$ALERT_EMAIL" ]] || {
+    echo "Error: Missing --email-alert." >&2
+    exit 2
+}
+
+[[ -n "$ACCOUNT" ]] || {
+    echo "Error: Missing --account." >&2
+    exit 2
+}
+
+[[ -n "$FROM" ]] || {
+    echo "Error: Missing --from." >&2
+    exit 2
+}
+
 FAIL_LIMIT=3
 CONNECT_TIMEOUT=5
 MAX_TIME=15
-ALERT_EMAIL="g.raposo@horizontes-informatica.com"
 
 SCRIPT_DIR="$(
     cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &&
     pwd
 )"
+
+REPO_DIR="$(dirname -- "$SCRIPT_DIR")"
+SEND_MAIL="$REPO_DIR/mail-notifier/send-mail.sh"
+
+if [[ ! -x "$SEND_MAIL" ]]; then
+    echo "Error: Mail notifier not found or not executable: $SEND_MAIL" >&2
+    exit 1
+fi
 
 LOG_FILE="${SCRIPT_DIR}/http-endpoint-monitor.log"
 STATE_DIR="${SCRIPT_DIR}/state"
@@ -51,21 +163,15 @@ log_message() {
 send_alert() {
     local message="$1"
     local subject="HTTP monitor: ${NAME}"
-    local from="g.raposo@horizontesinformatica.com"
-
+    
     logger -p user.warning -t http-monitor "$message"
 
-    if [[ -n "$ALERT_EMAIL" ]] && command -v msmtp >/dev/null 2>&1; then
-        {
-            printf 'From: HTTP Monitor <%s>\n' "$from"
-            printf 'To: %s\n' "$ALERT_EMAIL"
-            printf 'Subject: %s\n' "$subject"
-            printf 'Content-Type: text/plain; charset=UTF-8\n'
-            printf 'Content-Transfer-Encoding: 8bit\n'
-            printf '\n'
-            printf '%s\n' "$message"
-        } | msmtp "$ALERT_EMAIL"
-    fi
+    printf '%s\n' "$message" |
+            "$SEND_MAIL" \
+                --account "$ACCOUNT" \
+                --from "$FROM" \
+                --to "$ALERT_EMAIL" \
+                --subject "$subject"
 }
 
 previous_state="UNKNOWN"
