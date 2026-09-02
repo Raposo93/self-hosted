@@ -1,0 +1,12 @@
+[Unit]
+Description=Spaceship dynamic DNS updater
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=YOUR_USER
+Group=YOUR_USER
+WorkingDirectory=/path/to/self-hosted/spaceship-ddns
+EnvironmentFile=/path/to/self-hosted/spaceship-ddns/.env
+ExecStart=/usr/bin/python3 /path/to/self-hosted/spaceship-ddns/spaceship-ddns.py
