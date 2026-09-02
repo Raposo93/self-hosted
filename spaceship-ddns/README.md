@@ -82,20 +82,21 @@ A reusable timer can be stored directly in the repository.
 The service file is provided as `spaceship-ddns.service.example` because its
 user and filesystem paths depend on the host where it is installed.
 
-Create the local service file:
+Install the units directly from the repository:
 
 ```bash
-cp spaceship-ddns.service.example spaceship-ddns.service
+sudo cp spaceship-ddns.service.example \
+  /etc/systemd/system/spaceship-ddns.service
+
+sudo cp spaceship-ddns.timer \
+  /etc/systemd/system/spaceship-ddns.timer
 ```
 
-Edit it and replace the example user and paths with the local values.
-
-Install the units using symbolic links:
+Edit the installed service and replace the example user and paths with the
+local values:
 
 ```bash
-sudo ln -s "$(pwd)/spaceship-ddns.service"   /etc/systemd/system/spaceship-ddns.service
-
-sudo ln -s "$(pwd)/spaceship-ddns.timer"   /etc/systemd/system/spaceship-ddns.timer
+sudo nano /etc/systemd/system/spaceship-ddns.service
 ```
 
 Reload systemd:
@@ -167,5 +168,4 @@ spaceship-ddns/
 └── spaceship-ddns.timer
 ```
 
-Local files such as `.env` and the host-specific `spaceship-ddns.service`
-should not be versioned.
+The `.env` file contains local credentials and should not be versioned.
