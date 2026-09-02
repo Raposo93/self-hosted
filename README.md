@@ -6,19 +6,30 @@ This repository contains Docker Compose setups and helper scripts used to run an
 
 ## Contents
 
-| Path                          | Purpose                               |
-| ----------------------------- | ------------------------------------- |
-| `filebrowser/`                | File Browser deployment               |
-| `firefly/`                    | Firefly III deployment                |
-| `grocy/`                      | Grocy deployment                      |
-| `jellyfin/`                   | Jellyfin deployment                   |
-| `navidrome/`                  | Navidrome deployment                  |
-| `paperless-ngx/`              | Paperless-ngx deployment              |
-| `qBittorrent-nox/`            | qBittorrent-nox deployment            |
-| `vikunja/`                    | Vikunja deployment and helper scripts |
-| `wikijs/`                     | Wiki.js deployment                    |
-| `acme_certificate_installer/` | ACME certificate installation helper  |
-| `pbc/`                        | Proxmox Backup Client scripts         |
+### Services
+
+| Path | Purpose |
+| --- | --- |
+| `filebrowser/` | File Browser deployment |
+| `firefly/` | Firefly III deployment |
+| `grocy/` | Grocy deployment |
+| `jellyfin/` | Jellyfin deployment |
+| `navidrome/` | Navidrome deployment |
+| `paperless-ngx/` | Paperless-ngx deployment |
+| `qBittorrent-nox/` | qBittorrent-nox deployment |
+| `vikunja/` | Vikunja deployment and helper scripts |
+| `wikijs/` | Wiki.js deployment |
+
+### Utilities
+
+| Path | Purpose |
+| --- | --- |
+| `acme_certificate_installer/` | ACME certificate installation helper |
+| `http-endpoint-monitor/` | HTTP endpoint monitoring and alerts |
+| `mail-notifier/` | Shared email notification helper |
+| `pbc/` | Proxmox Backup Client scripts |
+| `shutdown-delayed/` | Delayed graphical shutdown helper |
+| `spaceship-ddns/` | Spaceship dynamic DNS updater |
 
 ## Repository conventions
 
