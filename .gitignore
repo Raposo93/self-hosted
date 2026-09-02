@@ -10,8 +10,11 @@ acme.json
 
 # Service runtime data
 firefly/firefly_iii_db/
+firefly/firefly_iii_upload/
+http-endpoint-monitor/state/
 jellyfin/cache/
 jellyfin/config/
+navidrome/data/
 paperless-ngx/data/
 paperless-ngx/db/
 paperless-ngx/media/
@@ -26,7 +29,3 @@ qBittorrent-nox/config/
 qBittorrent-nox/downloads/
 qBittorrent-nox/torrents/
 grocy/grocy/config
-
-# Nested runtime data
-vikunja/vikunja/db/
-vikunja/vikunja/files/
