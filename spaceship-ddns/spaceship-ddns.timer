@@ -4,7 +4,6 @@ Description=Run Spaceship DDNS updater periodically
 [Timer]
 OnBootSec=1min
 OnUnitActiveSec=5min
-Persistent=true
 Unit=spaceship-ddns.service
 
 [Install]
