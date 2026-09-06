@@ -47,9 +47,21 @@ log "Host: $HOSTNAME"
 log "Source: $SOURCE_DIR"
 log "Archive: $BACKUP_NAME"
 
+ENCRYPTION_KEYFILE_SET=false
+ENCRYPTION_CREDENTIAL_SET=false
+
+[[ -n "${ENCRYPTION_KEYFILE:-}" ]] && ENCRYPTION_KEYFILE_SET=true
+[[ -f "${CREDENTIALS_DIRECTORY:-}/proxmox-backup-client.encryption-password" ]] \
+    && ENCRYPTION_CREDENTIAL_SET=true
+
+if [[ "$ENCRYPTION_KEYFILE_SET" != "$ENCRYPTION_CREDENTIAL_SET" ]]; then
+    echo "Error: Incomplete encryption configuration" >&2
+    exit 1
+fi
+
 ENCRYPTION_ARGS=()
 
-if [[ -n "${ENCRYPTION_KEYFILE:-}" ]]; then
+if [[ "$ENCRYPTION_KEYFILE_SET" == true ]]; then
     if [[ ! -r "$ENCRYPTION_KEYFILE" ]]; then
         echo "Error: Encryption key file not found or not readable: $ENCRYPTION_KEYFILE" >&2
         exit 1
