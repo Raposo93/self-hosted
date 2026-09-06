@@ -6,13 +6,14 @@ Each backup profile uses its own environment file and can be scheduled with a sy
 
 ## Files
 
-| File                               | Purpose                            |
-| ---------------------------------- | ---------------------------------- |
-| `pbc_backup_data.sh`               | Runs the backup                    |
-| `.env.example`                     | Example profile configuration      |
-| `pbc-backup@.service.example`      | systemd service template           |
-| `pbc-backup-daily@.timer.example`  | Fixed daily schedule               |
+| File | Purpose |
+| --- | --- |
+| `pbc_backup_data.sh` | Runs the backup |
+| `.env.example` | Example profile configuration |
+| `pbc-backup@.service.example` | systemd service template |
+| `pbc-backup-daily@.timer.example` | Fixed daily schedule |
 | `pbc-backup-uptime@.timer.example` | Backup after boot and periodically |
+| `pbc-backup-encryption.conf.example` | Optional systemd drop-in for encrypted profiles |
 
 ## Requirements
 
@@ -37,9 +38,6 @@ LOGFILE="/var/log/pbc/photos.log"
 SOURCE_DIR="/path/to/data"
 REPO="user@realm!api_token_name@host:datastore"
 BACKUP_NAME="data.pxar"
-
-PBS_PASSWORD_CRED="/root/.config/proxmox-backup/my-api-token.cred"
-PBS_FINGERPRINT_CRED="/root/.config/proxmox-backup/my-fingerprint.cred"
 
 RECIPIENT_EMAIL="recipient@example.com"
 SENDER_EMAIL="sender@example.com"
@@ -69,7 +67,7 @@ sudo systemd-ask-password -n "PBS API token secret: " \
   | sudo systemd-creds encrypt \
       --name=proxmox-backup-client.password \
       - \
-      /root/.config/proxmox-backup/my-api-token.cred
+      /root/.config/proxmox-backup/<profile>-api-token.cred
 ```
 
 Create the fingerprint credential:
@@ -79,7 +77,16 @@ sudo systemd-ask-password -n "PBS fingerprint: " \
   | sudo systemd-creds encrypt \
       --name=proxmox-backup-client.fingerprint \
       - \
-      /root/.config/proxmox-backup/my-fingerprint.cred
+      /root/.config/proxmox-backup/<profile>-fingerprint.cred
+```
+
+For example, the `photos` profile uses:
+
+```text
+.env.photos
+photos-api-token.cred
+photos-fingerprint.cred
+pbc-backup@photos.service
 ```
 
 Protect the files:
@@ -186,7 +193,7 @@ The script:
 
 * validates the profile variables
 * checks that `SOURCE_DIR` exists
-* loads encrypted PBS credentials with `systemd-creds`
+* uses PBS credentials loaded by the systemd service
 * runs `proxmox-backup-client backup`
 * writes the configured log file
 * sends an email notification
@@ -203,3 +210,37 @@ Do not commit:
 ```
 
 Keep `.env.example` as the only environment template tracked by Git.
+
+### Optional client-side encryption
+
+Set `ENCRYPTION_KEYFILE` in the profile `.env.<profile>` to enable client-side encryption.
+
+Create the encryption key:
+
+```bash
+sudo proxmox-backup-client key create \
+  /root/.config/proxmox-backup/<profile>-encryption-key.json
+```
+
+Create the matching encrypted password credential:
+
+```bash
+sudo systemd-ask-password -n "PBS encryption key password: " \
+  | sudo systemd-creds encrypt \
+      --name=proxmox-backup-client.encryption-password \
+      - \
+      /root/.config/proxmox-backup/<profile>-encryption-password.cred
+```
+
+Install the encryption drop-in for the profile:
+
+```bash
+sudo mkdir -p /etc/systemd/system/pbc-backup@<profile>.service.d
+
+sudo cp pbc-backup-encryption.conf.example \
+  /etc/systemd/system/pbc-backup@<profile>.service.d/encryption.conf
+
+sudo systemctl daemon-reload
+```
+
+Profiles without `ENCRYPTION_KEYFILE` and without the encryption drop-in run unencrypted.

@@ -47,10 +47,22 @@ log "Host: $HOSTNAME"
 log "Source: $SOURCE_DIR"
 log "Archive: $BACKUP_NAME"
 
+ENCRYPTION_ARGS=()
+
+if [[ -n "${ENCRYPTION_KEYFILE:-}" ]]; then
+    if [[ ! -r "$ENCRYPTION_KEYFILE" ]]; then
+        echo "Error: Encryption key file not found or not readable: $ENCRYPTION_KEYFILE" >&2
+        exit 1
+    fi
+
+    ENCRYPTION_ARGS=(--keyfile "$ENCRYPTION_KEYFILE")
+fi
+
 set +e
 
 proxmox-backup-client backup "$BACKUP_NAME:$SOURCE_DIR" \
     --repository "$REPO" \
+    "${ENCRYPTION_ARGS[@]}" \
     --change-detection-mode metadata \
     --skip-e2big-xattr \
     >> "$LOGFILE" 2>&1

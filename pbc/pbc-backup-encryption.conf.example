@@ -1,0 +1,2 @@
+[Service]
+LoadCredentialEncrypted=proxmox-backup-client.encryption-password:/root/.config/proxmox-backup/%i-encryption-password.cred
