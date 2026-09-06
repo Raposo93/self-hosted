@@ -25,8 +25,6 @@ fi
 : "${RECIPIENT_EMAIL:?Missing RECIPIENT_EMAIL}"
 : "${SENDER_EMAIL:?Missing SENDER_EMAIL}"
 : "${MSMTP_ACCOUNT:?Missing MSMTP_ACCOUNT}"
-: "${PBS_PASSWORD_CRED:?Missing PBS_PASSWORD_CRED}"
-: "${PBS_FINGERPRINT_CRED:?Missing PBS_FINGERPRINT_CRED}"
 
 if [[ ! -d "$SOURCE_DIR" ]]; then
     echo "Error: Source directory does not exist: $SOURCE_DIR" >&2
@@ -51,14 +49,10 @@ log "Archive: $BACKUP_NAME"
 
 set +e
 
-systemd-run \
-    --pipe --wait --collect \
-    --property=LoadCredentialEncrypted=proxmox-backup-client.password:"$PBS_PASSWORD_CRED" \
-    --property=LoadCredentialEncrypted=proxmox-backup-client.fingerprint:"$PBS_FINGERPRINT_CRED" \
-    proxmox-backup-client backup "$BACKUP_NAME:$SOURCE_DIR" \
-        --repository "$REPO" \
-        --change-detection-mode metadata \
-        --skip-e2big-xattr \
+proxmox-backup-client backup "$BACKUP_NAME:$SOURCE_DIR" \
+    --repository "$REPO" \
+    --change-detection-mode metadata \
+    --skip-e2big-xattr \
     >> "$LOGFILE" 2>&1
 
 STATUS=$?
