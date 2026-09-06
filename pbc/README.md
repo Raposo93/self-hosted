@@ -244,3 +244,17 @@ sudo systemctl daemon-reload
 ```
 
 Profiles without `ENCRYPTION_KEYFILE` and without the encryption drop-in run unencrypted.
+
+## Encryption recovery
+
+Encrypted backups require the profile encryption key and its password to restore their contents.
+
+Keep an offline copy of the encryption key and password outside the machine being backed up. Do not keep the only recovery material on the protected machine.
+
+Periodically test restoring an encrypted backup to a temporary directory:
+
+```bash
+proxmox-backup-client restore <snapshot> <archive-name> /tmp/pbc-restore-test \
+  --repository "<repository>" \
+  --keyfile /path/to/<profile>-encryption-key.json
+```
