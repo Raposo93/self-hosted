@@ -9,12 +9,6 @@ set -Eeuo pipefail
 umask 077
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="$SCRIPT_DIR/.env"
-
-if [[ ! -r "$ENV_FILE" ]]; then
-    echo "Error: Environment file not found or not readable: $ENV_FILE" >&2
-    exit 1
-fi
 
 REPO_DIR="$(dirname -- "$SCRIPT_DIR")"
 SEND_MAIL="$REPO_DIR/mail-notifier/send-mail.sh"
@@ -23,10 +17,6 @@ if [[ ! -x "$SEND_MAIL" ]]; then
     echo "Error: Mail notifier not found or not executable: $SEND_MAIL" >&2
     exit 1
 fi
-
-set -a
-source "$ENV_FILE"
-set +a
 
 : "${LOGFILE:?Missing LOGFILE}"
 : "${SOURCE_DIR:?Missing SOURCE_DIR}"

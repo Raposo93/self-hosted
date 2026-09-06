@@ -1,37 +1,39 @@
 # Proxmox Backup Client
 
-Backup helper script using Proxmox Backup Client, encrypted systemd credentials and email notifications.
+Reusable backup helper using Proxmox Backup Client, encrypted systemd credentials and email notifications.
 
-This directory contains a reusable script for backing up a local directory to a Proxmox Backup Server datastore.
+Each backup profile uses its own environment file and can be scheduled with a systemd timer.
 
 ## Files
 
-| File | Purpose |
-| --- | --- |
-| `pbc_backup_data.sh` | Runs the backup with Proxmox Backup Client |
-| `.env.example` | Example environment configuration |
-| `.env` | Local configuration file, not committed |
+| File                               | Purpose                            |
+| ---------------------------------- | ---------------------------------- |
+| `pbc_backup_data.sh`               | Runs the backup                    |
+| `.env.example`                     | Example profile configuration      |
+| `pbc-backup@.service.example`      | systemd service template           |
+| `pbc-backup-daily@.timer.example`  | Fixed daily schedule               |
+| `pbc-backup-uptime@.timer.example` | Backup after boot and periodically |
 
 ## Requirements
 
-- Proxmox Backup Client installed on the machine running the backup
-- Access to a Proxmox Backup Server datastore
-- A PBS user or API token with backup permissions
-- `systemd-creds`
-- `msmtp` configured for email notifications
+* Proxmox Backup Client
+* Access to a Proxmox Backup Server datastore
+* PBS user or API token with backup permissions
+* `systemd-creds`
+* `msmtp` configured for email notifications
 
-## Setup
+## Create a backup profile
 
-Copy the example environment file:
+Copy the example using a profile name:
 
 ```bash
-cp .env.example .env
+cp .env.example .env.photos
 ```
 
-Edit `.env` with the local values:
+Example:
 
 ```bash
-LOGFILE="/var/log/pbc/backup.log"
+LOGFILE="/var/log/pbc/photos.log"
 SOURCE_DIR="/path/to/data"
 REPO="user@realm!api_token_name@host:datastore"
 BACKUP_NAME="data.pxar"
@@ -44,248 +46,160 @@ SENDER_EMAIL="sender@example.com"
 MSMTP_ACCOUNT="default"
 ```
 
-The `.env` file must not be committed.
+Profile files such as `.env.photos` or `.env.ssh` must not be committed.
 
-## Repository format
-
-The `REPO` value uses this format:
+Repository format:
 
 ```text
 user@realm!api_token_name@host:datastore
 ```
 
-Example:
-
-```text
-photos@pbs!photos-backup@10.1.1.22:photos-backup
-```
-
-If you type the repository directly in an interactive shell, escape `!` or disable Bash history expansion:
-
-```bash
-set +H
-```
-
-This is not needed when the value is loaded from `.env` and used as `"$REPO"` inside the script.
-
 ## Create encrypted credentials
-
-Enter a root shell:
-
-```bash
-sudo -i
-```
 
 Create the credential directory:
 
 ```bash
-install -d -m 700 -o root -g root /root/.config/proxmox-backup
+sudo install -d -m 700 -o root -g root /root/.config/proxmox-backup
 ```
 
-Create the encrypted API token secret credential:
+Create the API token credential:
 
 ```bash
-systemd-ask-password -n "PBS API token secret: " \
-  | systemd-creds encrypt \
+sudo systemd-ask-password -n "PBS API token secret: " \
+  | sudo systemd-creds encrypt \
       --name=proxmox-backup-client.password \
       - \
       /root/.config/proxmox-backup/my-api-token.cred
 ```
 
-Create the encrypted fingerprint credential:
+Create the fingerprint credential:
 
 ```bash
-systemd-ask-password -n "PBS fingerprint: " \
-  | systemd-creds encrypt \
+sudo systemd-ask-password -n "PBS fingerprint: " \
+  | sudo systemd-creds encrypt \
       --name=proxmox-backup-client.fingerprint \
       - \
       /root/.config/proxmox-backup/my-fingerprint.cred
 ```
 
-
-Lock down permissions:
+Protect the files:
 
 ```bash
-chown -R root:root /root/.config/proxmox-backup
-chmod 700 /root/.config/proxmox-backup
-chmod 600 /root/.config/proxmox-backup/*.cred
-```
-
-Expected result:
-
-```text
-drwx------ 2 root root ... /root/.config/proxmox-backup
--rw------- 1 root root ... my-api-token.cred
--rw------- 1 root root ... my-fingerprint.cred
+sudo chmod 700 /root/.config/proxmox-backup
+sudo chmod 600 /root/.config/proxmox-backup/*.cred
 ```
 
 ## PBS permissions
 
-The API token needs permission on the target datastore.
-
-For a backup-only token, assign:
+The API token needs `DatastoreBackup` on the target datastore:
 
 ```text
 Path: /datastore/<datastore-name>
 Role: DatastoreBackup
 ```
 
-Example:
+## Install the systemd service
+
+Copy and edit the service template:
+
+```bash
+sudo cp pbc-backup@.service.example \
+  /etc/systemd/system/pbc-backup@.service
+```
+
+Replace `/path/to/self-hosted/pbc` with the real repository path.
+
+Reload systemd:
+
+```bash
+sudo systemctl daemon-reload
+```
+
+A profile is selected through the instance name:
 
 ```text
-Path: /datastore/photos-backup
-User/Token: photos@pbs!photos-backup
-Role: DatastoreBackup
-Propagate: yes
+pbc-backup@photos.service -> .env.photos
+pbc-backup@ssh.service    -> .env.ssh
 ```
 
-Without the correct datastore permission, the client may fail with:
+Test a profile manually:
+
+```bash
+sudo systemctl start pbc-backup@photos.service
+sudo systemctl status pbc-backup@photos.service
+```
+
+View logs:
+
+```bash
+journalctl -u pbc-backup@photos.service
+```
+
+## Scheduling
+
+### Fixed daily schedule
+
+Suitable for always-on systems.
+
+```bash
+sudo cp pbc-backup-daily@.timer.example \
+  /etc/systemd/system/pbc-backup-daily@.timer
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now pbc-backup-daily@photos.timer
+```
+
+Default schedule:
 
 ```text
-Error: permission check failed
+03:00 daily
 ```
 
-## Test the credentials
+### Uptime-based schedule
 
-Run this as root:
+Suitable for systems without a fixed uptime schedule.
 
 ```bash
-systemd-run \
-  --pipe --wait --collect \
-  --property=LoadCredentialEncrypted=proxmox-backup-client.password:/root/.config/proxmox-backup/my-api-token.cred \
-  --property=LoadCredentialEncrypted=proxmox-backup-client.fingerprint:/root/.config/proxmox-backup/my-fingerprint.cred \
-  proxmox-backup-client status \
-    --repository "photos@pbs!photos-backup@10.1.1.22:photos-backup"
+sudo cp pbc-backup-uptime@.timer.example \
+  /etc/systemd/system/pbc-backup-uptime@.timer
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now pbc-backup-uptime@ssh.timer
 ```
 
-A successful response shows datastore usage and ends with:
+Default behavior:
 
 ```text
-Finished with result: success
+2 minutes after boot
+then every 12 hours while the system remains running
 ```
 
-## Test email notifications
-
-Load the local environment file:
+Check timers with:
 
 ```bash
-set -a
-source .env
-set +a
+systemctl list-timers 'pbc-backup*'
 ```
 
-Send a test email:
+## What the script does
 
-```bash
-msmtp -a "$MSMTP_ACCOUNT" "$RECIPIENT_EMAIL" <<EOF
-From: $SENDER_EMAIL
-To: $RECIPIENT_EMAIL
-Subject: Test backup notification from $(hostname)
+The script:
 
-This is a test email using the same settings as pbc_backup_data.sh.
-EOF
-```
+* validates the profile variables
+* checks that `SOURCE_DIR` exists
+* loads encrypted PBS credentials with `systemd-creds`
+* runs `proxmox-backup-client backup`
+* writes the configured log file
+* sends an email notification
+* exits with the backup command status
 
-If it fails, run with debug output:
-
-```bash
-msmtp --debug -a "$MSMTP_ACCOUNT" "$RECIPIENT_EMAIL"
-```
-
-## Run the backup
-
-Make the script executable:
-
-```bash
-chmod +x pbc_backup_data.sh
-```
-
-Run it:
-
-```bash
-./pbc_backup_data.sh
-```
-
-The script will:
-
-- load `.env`
-- validate required variables
-- check that `SOURCE_DIR` exists
-- run `proxmox-backup-client backup`
-- write a log file
-- send an email notification
-- exit with the backup command status
-
-## Security notes
+## Security
 
 Do not commit:
 
-- `.env`
-- `.cred` files
-- API token secrets
-- logs
-- generated backup output
-
-Recommended `.gitignore` entries:
-
-```gitignore
-.env
+```text
+.env.*
 *.cred
 *.log
 ```
 
-The encrypted credential files are still treated as sensitive and should remain owned by root with restrictive permissions.
-
-## Troubleshooting
-
-### `No such file or directory: .env`
-
-Run the command from this directory or source the environment file with an absolute path.
-
-Example:
-
-```bash
-source /home/user/self-hosted/pbc/.env
-```
-
-### `msmtp: no recipients found`
-
-The environment file was not loaded or `RECIPIENT_EMAIL` is empty.
-
-Check:
-
-```bash
-echo "$RECIPIENT_EMAIL"
-echo "$MSMTP_ACCOUNT"
-echo "$SENDER_EMAIL"
-```
-
-### `event not found`
-
-Bash is interpreting `!` in the repository string.
-
-Use:
-
-```bash
-set +H
-```
-
-or escape the exclamation mark when typing the repository manually:
-
-```bash
-photos@pbs\!photos-backup@10.1.1.22:photos-backup
-```
-
-### `Error: permission check failed`
-
-The API token does not have the required permission on the datastore.
-
-Assign `DatastoreBackup` on:
-
-```text
-/datastore/<datastore-name>
-```
-
-### `Credential secret file is not located on encrypted media`
-
-This warning means systemd's local credential secret is not stored on encrypted media. The credential file is still generated, but the host should be treated as trusted.
+Keep `.env.example` as the only environment template tracked by Git.

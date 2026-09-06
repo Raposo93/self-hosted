@@ -1,0 +1,10 @@
+[Unit]
+Description=Proxmox Backup Client backup (%i)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/path/to/self-hosted/pbc
+EnvironmentFile=/path/to/self-hosted/pbc/.env.%i
+ExecStart=/bin/bash /path/to/self-hosted/pbc/pbc_backup_data.sh

@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Proxmox Backup Client backup after boot (%i)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=12h
+Unit=pbc-backup@%i.service
+
+[Install]
+WantedBy=timers.target

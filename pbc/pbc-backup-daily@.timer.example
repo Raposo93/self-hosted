@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Proxmox Backup Client backup daily (%i)
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+Unit=pbc-backup@%i.service
+
+[Install]
+WantedBy=timers.target
