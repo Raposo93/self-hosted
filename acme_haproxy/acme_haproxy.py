@@ -17,6 +17,7 @@ logging.basicConfig(
 log = logging.getLogger()
 
 HAPROXY_HOSTS_MAP = Path("/etc/haproxy/maps/hosts.map")
+ACME_WEBROOT = Path("/var/www/acme-challenges")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -31,6 +32,16 @@ def _parse_args() -> argparse.Namespace:
         "renew",
         help="Renew configured ACME certificates",
         description="Renew all ACME certificates configured for HAProxy",
+    )
+
+    issue_parser = subparsers.add_parser(
+        "issue",
+        help="Issue a new ACME certificate",
+        description="Issue and deploy a certificate for an HAProxy domain",
+    )
+    issue_parser.add_argument(
+        "domain",
+        help="Domain to issue the certificate for",
     )
 
     return parser.parse_args()
@@ -137,12 +148,11 @@ def _reload_haproxy() -> None:
         log.info(result.stderr)
 
 
-def _renew_domain(acme_sh: Path, home: Path, domain: str) -> bool:
-    renewed = _renew_certificate(acme_sh, domain)
-
-    if not renewed:
-        return False
-
+def _deploy_certificate(
+    acme_sh: Path,
+    home: Path,
+    domain: str,
+) -> None:
     paths = _get_certificate_paths(home, domain)
 
     _install_certificate(
@@ -157,6 +167,15 @@ def _renew_domain(acme_sh: Path, home: Path, domain: str) -> bool:
         paths["keyfile"],
         paths["cert_dest"],
     )
+
+
+def _renew_domain(acme_sh: Path, home: Path, domain: str) -> bool:
+    renewed = _renew_certificate(acme_sh, domain)
+
+    if not renewed:
+        return False
+
+    _deploy_certificate(acme_sh, home, domain)
 
     return True
 
@@ -184,6 +203,34 @@ def _load_domains(hosts_map: Path) -> list[str]:
         domains.append(domain)
 
     return domains
+
+
+def _issue_certificate(
+    acme_sh: Path,
+    domain: str,
+) -> None:
+    result = subprocess.run(
+        [
+            str(acme_sh),
+            "--issue",
+            "-d",
+            domain,
+            "-w",
+            str(ACME_WEBROOT),
+            "--ecc",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    log.info(f"Issued certificate for {domain}")
+
+    if result.stdout:
+        log.info(result.stdout)
+
+    if result.stderr:
+        log.info(result.stderr)
 
 
 def renew_all() -> int:
@@ -218,11 +265,48 @@ def renew_all() -> int:
     return 1 if had_errors else 0
 
 
+def issue(domain: str) -> int:
+    domains = _load_domains(HAPROXY_HOSTS_MAP)
+
+    if domain not in domains:
+        log.error(f"Domain {domain} is not configured in {HAPROXY_HOSTS_MAP}")
+        return 1
+
+    home = Path(os.environ["HOME"])
+    acme_sh = home / ".acme.sh" / "acme.sh"
+
+    log.info(f"Domain: {domain}")
+    log.info(f"Home: {home}")
+    log.info(f"acme.sh: {acme_sh}")
+    log.info(f"ACME webroot: {ACME_WEBROOT}")
+
+    try:
+        _issue_certificate(acme_sh, domain)
+        _deploy_certificate(acme_sh, home, domain)
+        _reload_haproxy()
+
+    except subprocess.CalledProcessError as e:
+        log.error(
+            f"Failed to issue or deploy {domain} "
+            f"(exit code {e.returncode}):\n{e.stderr}"
+        )
+        return 1
+
+    except OSError as e:
+        log.error(f"Failed to issue or deploy {domain}: {e}")
+        return 1
+
+    return 0
+
+
 def main() -> int:
     args = _parse_args()
 
     if args.command == "renew":
         return renew_all()
+
+    if args.command == "issue":
+        return issue(args.domain)
 
     return 1
 
