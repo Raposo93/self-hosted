@@ -91,7 +91,13 @@ Some scripts may require root permissions, systemd, local credentials or extra c
 
 Backup-related scripts live under `pbc/`.
 
-Review `pbc/.env.example`, copy it to `.env`, adapt the values and keep `.env` untracked.
+Each backup profile uses its own environment file. Review `pbc/.env.example` and copy it to `pbc/.env.<profile>`, for example:
+
+```bash
+cp pbc/.env.example pbc/.env.photos
+```
+
+Adapt the values for the profile and keep `.env.*` files untracked.
 
 ## Notes
 
