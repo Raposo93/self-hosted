@@ -10,30 +10,30 @@ HAProxy when a certificate is renewed.
 * `acme.sh`
 * HAProxy
 * systemd
+* Permission to read `/etc/haproxy/maps/hosts.map`
 * Permission to write certificates under `/etc/haproxy/certs/acme`
 * Permission to reload HAProxy
 
-Install the Python dependencies:
-
-```bash
-python3 -m pip install -r requirements.txt
-```
-
 ## Configuration
 
-Copy the example environment file:
+Managed domains are read from the HAProxy host map:
 
-```bash
-cp .env.example .env
+```text
+/etc/haproxy/maps/hosts.map
 ```
 
-Configure the domains as a JSON array:
+Each non-empty, non-comment line must contain a domain and its backend:
 
-```ini
-DOMAINS=["example.com","service.example.com"]
+```text
+example.com example_backend
+service.example.com service_backend
 ```
 
-The script loads `.env` from its own directory.
+Blank lines and lines beginning with `#` are ignored.
+
+The first field is used as the domain name for certificate renewal.
+
+The HAProxy host map is the source of truth for domains managed by this tool.
 
 ## systemd
 
@@ -119,16 +119,22 @@ The example timer runs once per day and uses `Persistent=true`, so a missed exec
 
 The script can also be executed manually for testing.
 
-Run it with a `HOME` that contains the expected `acme.sh` installation and with sufficient privileges to write HAProxy certificates and reload the service:
+Run it with a `HOME` that contains the expected `acme.sh` installation and with sufficient privileges to read the HAProxy host map, write HAProxy certificates, and reload the service:
 
 ```bash
 sudo HOME=/path/to/acme-user-home \
-  python3 acme_haproxy.py
+  python3 acme_haproxy.py renew
 ```
 
 ## How it works
 
-For each configured domain, the script:
+The `renew` command reads the managed domains from:
+
+```text
+/etc/haproxy/maps/hosts.map
+```
+
+For each domain found in the map, the script:
 
 1. runs `acme.sh --renew` using ECC certificates;
 2. skips domains that are not due for renewal;
@@ -162,6 +168,12 @@ journalctl -u acme-haproxy.service --since today
 
 ## Paths
 
+HAProxy host mappings are read from:
+
+```text
+/etc/haproxy/maps/hosts.map
+```
+
 The script expects `acme.sh` at:
 
 ```text
@@ -182,4 +194,4 @@ HAProxy PEM files are written to:
 
 ## Security
 
-Runtime credentials, certificates, private keys, and local `.env` files must not be committed to the repository.
+Runtime credentials, certificates, and private keys must not be committed to the repository.

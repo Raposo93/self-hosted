@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 
 import argparse
-import json
 import logging
 import os
 import subprocess
 import sys
 from pathlib import Path
-
-from dotenv import load_dotenv
 
 logging.basicConfig(
     level=logging.INFO,
@@ -18,6 +15,8 @@ logging.basicConfig(
     ],
 )
 log = logging.getLogger()
+
+HAPROXY_HOSTS_MAP = Path("/etc/haproxy/maps/hosts.map")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -162,18 +161,33 @@ def _renew_domain(acme_sh: Path, home: Path, domain: str) -> bool:
     return True
 
 
+def _load_domains(hosts_map: Path) -> list[str]:
+    domains = []
+
+    for line_number, raw_line in enumerate(
+        hosts_map.read_text().splitlines(),
+        start=1,
+    ):
+        line = raw_line.strip()
+
+        if not line or line.startswith("#"):
+            continue
+
+        parts = line.split()
+
+        if len(parts) != 2:
+            raise ValueError(
+                f"Invalid HAProxy map entry at {hosts_map}:{line_number}: {line!r}"
+            )
+
+        domain, _backend = parts
+        domains.append(domain)
+
+    return domains
+
+
 def renew_all() -> int:
-    env_file = Path(__file__).with_name(".env")
-    load_dotenv(env_file)
-
-    domains_str = os.getenv("DOMAINS", "[]")
-
-    try:
-        domains = json.loads(domains_str)
-    except json.JSONDecodeError as e:
-        raise ValueError(
-            "DOMAINS is not in the correct format. It should be a JSON array string."
-        ) from e
+    domains = _load_domains(HAPROXY_HOSTS_MAP)
 
     home = Path(os.environ["HOME"])
     acme_sh = home / ".acme.sh" / "acme.sh"
