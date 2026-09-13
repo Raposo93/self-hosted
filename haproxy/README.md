@@ -30,8 +30,7 @@ The repository contains:
 haproxy/
 ├── README.md
 ├── haproxy.cfg.example
-└── maps/
-    └── hosts.map.example
+└── hosts.map.example
 ```
 
 The installed configuration uses:
@@ -69,7 +68,7 @@ sudo cp haproxy.cfg.example /etc/haproxy/haproxy.cfg
 Copy the host map:
 
 ```bash
-sudo cp maps/hosts.map.example /etc/haproxy/maps/hosts.map
+sudo cp hosts.map.example /etc/haproxy/maps/hosts.map
 ```
 
 Edit both files for the services that will be published.
