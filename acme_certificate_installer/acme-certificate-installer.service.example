@@ -1,0 +1,10 @@
+[Unit]
+Description=Renew ACME certificates and install them for HAProxy
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/path/to/self-hosted/acme_certificate_installer
+Environment=HOME=/path/to/acme-user-home
+ExecStart=/usr/bin/python3 /path/to/self-hosted/acme_certificate_installer/acme_certificate_installer.py
