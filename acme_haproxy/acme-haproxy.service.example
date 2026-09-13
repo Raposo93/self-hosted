@@ -5,6 +5,6 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/path/to/self-hosted/acme_certificate_installer
+WorkingDirectory=/path/to/self-hosted/acme_haproxy
 Environment=HOME=/path/to/acme-user-home
-ExecStart=/usr/bin/python3 /path/to/self-hosted/acme_certificate_installer/acme_certificate_installer.py
+ExecStart=/usr/bin/python3 /path/to/self-hosted/acme_haproxy/acme_haproxy.py

@@ -1,6 +1,8 @@
-# ACME Certificate Installer
+# ACME HAProxy
 
-Helper script for renewing ECC certificates with `acme.sh`, rebuilding HAProxy PEM files, and reloading HAProxy when a certificate is renewed.
+Helper script for renewing ECC certificates with `acme.sh`,
+installing them for HAProxy, rebuilding PEM files, and reloading
+HAProxy when a certificate is renewed.
 
 ## Requirements
 
@@ -35,21 +37,21 @@ The script loads `.env` from its own directory.
 
 ## systemd
 
-The recommended way to run the installer is through the provided systemd service and timer.
+The recommended way to run the tool is through the provided systemd service and timer.
 
 ### Install the service
 
 Copy the service template:
 
 ```bash
-sudo cp acme-certificate-installer.service.example \
-  /etc/systemd/system/acme-certificate-installer.service
+sudo cp acme-haproxy.service.example \
+  /etc/systemd/system/acme-haproxy.service
 ```
 
 Edit the installed service and replace:
 
 ```text
-/path/to/self-hosted/acme_certificate_installer
+/path/to/self-hosted/acme_haproxy
 /path/to/acme-user-home
 ```
 
@@ -74,14 +76,14 @@ sudo systemctl daemon-reload
 Run the service manually before enabling the timer:
 
 ```bash
-sudo systemctl start acme-certificate-installer.service
-sudo systemctl status acme-certificate-installer.service
+sudo systemctl start acme-haproxy.service
+sudo systemctl status acme-haproxy.service
 ```
 
 View its logs with:
 
 ```bash
-journalctl -u acme-certificate-installer.service
+journalctl -u acme-haproxy.service
 ```
 
 ### Install the timer
@@ -89,8 +91,8 @@ journalctl -u acme-certificate-installer.service
 Copy the timer template:
 
 ```bash
-sudo cp acme-certificate-installer.timer.example \
-  /etc/systemd/system/acme-certificate-installer.timer
+sudo cp acme-haproxy.timer.example \
+  /etc/systemd/system/acme-haproxy.timer
 ```
 
 Reload systemd:
@@ -102,13 +104,13 @@ sudo systemctl daemon-reload
 Enable and start the timer:
 
 ```bash
-sudo systemctl enable --now acme-certificate-installer.timer
+sudo systemctl enable --now acme-haproxy.timer
 ```
 
 Check the next scheduled execution:
 
 ```bash
-systemctl list-timers acme-certificate-installer.timer
+systemctl list-timers acme-haproxy.timer
 ```
 
 The example timer runs once per day and uses `Persistent=true`, so a missed execution is triggered after the system becomes available again.
@@ -121,7 +123,7 @@ Run it with a `HOME` that contains the expected `acme.sh` installation and with 
 
 ```bash
 sudo HOME=/path/to/acme-user-home \
-  python3 acme_certificate_installer.py
+  python3 acme_haproxy.py
 ```
 
 ## How it works
@@ -143,19 +145,19 @@ The script writes its logs to standard output.
 When executed through systemd, logs are available through the journal:
 
 ```bash
-journalctl -u acme-certificate-installer.service
+journalctl -u acme-haproxy.service
 ```
 
 Show the latest entries:
 
 ```bash
-journalctl -u acme-certificate-installer.service -n 100
+journalctl -u acme-haproxy.service -n 100
 ```
 
 Show entries from the current day:
 
 ```bash
-journalctl -u acme-certificate-installer.service --since today
+journalctl -u acme-haproxy.service --since today
 ```
 
 ## Paths
