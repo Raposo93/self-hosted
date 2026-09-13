@@ -1,0 +1,4 @@
+# Hostname                           HAProxy backend
+
+example.com                          example_backend
+service.example.com                  remote_backend
