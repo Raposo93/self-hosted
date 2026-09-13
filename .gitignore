@@ -4,6 +4,9 @@
 .env.*
 !.env.example
 
+# python cache
+__pycache__/
+
 # Logs
 *.log
 
