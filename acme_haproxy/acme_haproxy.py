@@ -16,6 +16,7 @@ logging.basicConfig(
 )
 log = logging.getLogger()
 
+HAPROXY_CONFIG = Path("/etc/haproxy/haproxy.cfg")
 HAPROXY_HOSTS_MAP = Path("/etc/haproxy/maps/hosts.map")
 ACME_WEBROOT = Path("/var/www/acme-challenges")
 
@@ -131,7 +132,31 @@ def _build_haproxy_pem(
     log.info(f"HAProxy PEM written to {cert_dest}")
 
 
+def _validate_haproxy_config() -> None:
+    result = subprocess.run(
+        [
+            "haproxy",
+            "-c",
+            "-f",
+            str(HAPROXY_CONFIG),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    log.info("HAProxy configuration validated successfully.")
+
+    if result.stdout:
+        log.info(result.stdout)
+
+    if result.stderr:
+        log.info(result.stderr)
+
+
 def _reload_haproxy() -> None:
+    _validate_haproxy_config()
+
     result = subprocess.run(
         ["systemctl", "reload", "haproxy"],
         check=True,
@@ -259,7 +284,10 @@ def renew_all() -> int:
         try:
             _reload_haproxy()
         except subprocess.CalledProcessError as e:
-            log.error(f"HAProxy reload failed (exit code {e.returncode}):\n{e.stderr}")
+            log.error(
+                f"HAProxy validation or reload failed "
+                f"(exit code {e.returncode}):\n{e.stderr}"
+            )
             had_errors = True
 
     return 1 if had_errors else 0
