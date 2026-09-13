@@ -7,4 +7,4 @@ After=network-online.target
 Type=oneshot
 WorkingDirectory=/path/to/self-hosted/acme_haproxy
 Environment=HOME=/path/to/acme-user-home
-ExecStart=/usr/bin/python3 /path/to/self-hosted/acme_haproxy/acme_haproxy.py
+ExecStart=/usr/bin/python3 /path/to/self-hosted/acme_haproxy/acme_haproxy.py renew

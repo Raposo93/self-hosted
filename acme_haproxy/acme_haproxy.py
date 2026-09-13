@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import argparse
 import json
 import logging
 import os
@@ -19,7 +20,24 @@ logging.basicConfig(
 log = logging.getLogger()
 
 
-def get_certificate_paths(home: Path, domain: str):
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Manage ACME certificates for HAProxy")
+
+    subparsers = parser.add_subparsers(
+        dest="command",
+        required=True,
+    )
+
+    subparsers.add_parser(
+        "renew",
+        help="Renew configured ACME certificates",
+        description="Renew all ACME certificates configured for HAProxy",
+    )
+
+    return parser.parse_args()
+
+
+def _get_certificate_paths(home: Path, domain: str) -> dict[str, Path]:
     acme_home = home / ".acme.sh" / f"{domain}_ecc"
 
     return {
@@ -29,7 +47,7 @@ def get_certificate_paths(home: Path, domain: str):
     }
 
 
-def renew_certificate(acme_sh: Path, domain: str) -> bool:
+def _renew_certificate(acme_sh: Path, domain: str) -> bool:
     result = subprocess.run(
         [str(acme_sh), "--renew", "-d", domain, "--ecc"],
         check=False,
@@ -60,7 +78,7 @@ def renew_certificate(acme_sh: Path, domain: str) -> bool:
     return True
 
 
-def install_certificate(
+def _install_certificate(
     acme_sh: Path,
     domain: str,
     fullchain: Path,
@@ -90,7 +108,7 @@ def install_certificate(
         log.info(f"Install stderr for {domain}:\n{result.stderr}")
 
 
-def build_haproxy_pem(
+def _build_haproxy_pem(
     fullchain: Path,
     keyfile: Path,
     cert_dest: Path,
@@ -103,7 +121,7 @@ def build_haproxy_pem(
     log.info(f"HAProxy PEM written to {cert_dest}")
 
 
-def reload_haproxy() -> None:
+def _reload_haproxy() -> None:
     result = subprocess.run(
         ["systemctl", "reload", "haproxy"],
         check=True,
@@ -120,22 +138,22 @@ def reload_haproxy() -> None:
         log.info(result.stderr)
 
 
-def renew_domain(acme_sh: Path, home: Path, domain: str) -> bool:
-    renewed = renew_certificate(acme_sh, domain)
+def _renew_domain(acme_sh: Path, home: Path, domain: str) -> bool:
+    renewed = _renew_certificate(acme_sh, domain)
 
     if not renewed:
         return False
 
-    paths = get_certificate_paths(home, domain)
+    paths = _get_certificate_paths(home, domain)
 
-    install_certificate(
+    _install_certificate(
         acme_sh,
         domain,
         paths["fullchain"],
         paths["keyfile"],
     )
 
-    build_haproxy_pem(
+    _build_haproxy_pem(
         paths["fullchain"],
         paths["keyfile"],
         paths["cert_dest"],
@@ -144,7 +162,7 @@ def renew_domain(acme_sh: Path, home: Path, domain: str) -> bool:
     return True
 
 
-def main() -> None:
+def renew_all() -> int:
     env_file = Path(__file__).with_name(".env")
     load_dotenv(env_file)
 
@@ -169,7 +187,7 @@ def main() -> None:
 
     for domain in domains:
         try:
-            if renew_domain(acme_sh, home, domain):
+            if _renew_domain(acme_sh, home, domain):
                 haproxy_needs_reload = True
 
         except (RuntimeError, subprocess.CalledProcessError, OSError) as e:
@@ -178,14 +196,22 @@ def main() -> None:
 
     if haproxy_needs_reload:
         try:
-            reload_haproxy()
+            _reload_haproxy()
         except subprocess.CalledProcessError as e:
             log.error(f"HAProxy reload failed (exit code {e.returncode}):\n{e.stderr}")
             had_errors = True
 
-    if had_errors:
-        sys.exit(1)
+    return 1 if had_errors else 0
+
+
+def main() -> int:
+    args = _parse_args()
+
+    if args.command == "renew":
+        return renew_all()
+
+    return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
