@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import json
 import logging
 import os
@@ -6,7 +8,6 @@ import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
-
 
 logging.basicConfig(
     level=logging.INFO,
@@ -17,138 +18,174 @@ logging.basicConfig(
 )
 log = logging.getLogger()
 
-env_file = Path(__file__).with_name(".env")
-load_dotenv(env_file)
 
-domains_str = os.getenv("DOMAINS", "[]")
-
-try:
-    domains = json.loads(domains_str)
-except json.JSONDecodeError as e:
-    raise ValueError(
-        "DOMAINS is not in the correct format. It should be a JSON array string."
-    ) from e
-
-home = Path(os.environ["HOME"])
-acme_sh = home / ".acme.sh" / "acme.sh"
-
-log.info(f"Domains: {domains}")
-log.info(f"Home: {home}")
-log.info(f"acme.sh: {acme_sh}")
-
-had_errors = False
-haproxy_needs_reload = False
-
-for domain in domains:
+def get_certificate_paths(home: Path, domain: str):
     acme_home = home / ".acme.sh" / f"{domain}_ecc"
-    cert_dest = Path("/etc/haproxy/certs/acme") / f"{domain}.pem"
-    fullchain = acme_home / "fullchain.cer"
-    keyfile = acme_home / f"{domain}.key"
 
-    # 1) Renew certificate
-    renew = subprocess.run(
+    return {
+        "fullchain": acme_home / "fullchain.cer",
+        "keyfile": acme_home / f"{domain}.key",
+        "cert_dest": Path("/etc/haproxy/certs/acme") / f"{domain}.pem",
+    }
+
+
+def renew_certificate(acme_sh: Path, domain: str) -> bool:
+    result = subprocess.run(
         [str(acme_sh), "--renew", "-d", domain, "--ecc"],
+        check=False,
         capture_output=True,
         text=True,
     )
 
-    if renew.returncode not in (0, 2):
-        log.error(
-            f"Renew failed for {domain} "
-            f"(exit code {renew.returncode})"
-        )
-
-        if renew.stdout:
-            log.error(f"Renew stdout for {domain}:\n{renew.stdout}")
-
-        if renew.stderr:
-            log.error(f"Renew stderr for {domain}:\n{renew.stderr}")
-
-        had_errors = True
-        continue
-
-    if renew.returncode == 2:
+    if result.returncode == 2:
         log.info(f"Renew skipped for {domain} (not due)")
-        continue
+        return False
+
+    if result.returncode != 0:
+        log.error(f"Renew failed for {domain} (exit code {result.returncode})")
+
+        if result.stdout:
+            log.error(f"Renew stdout for {domain}:\n{result.stdout}")
+
+        if result.stderr:
+            log.error(f"Renew stderr for {domain}:\n{result.stderr}")
+
+        raise RuntimeError(f"Failed to renew {domain}")
 
     log.info(f"Renewed {domain}")
 
-    if renew.stdout:
-        log.info(renew.stdout)
+    if result.stdout:
+        log.info(result.stdout)
 
-    # 2) Install certificate files
+    return True
+
+
+def install_certificate(
+    acme_sh: Path,
+    domain: str,
+    fullchain: Path,
+    keyfile: Path,
+) -> None:
+    result = subprocess.run(
+        [
+            str(acme_sh),
+            "--install-cert",
+            "-d",
+            domain,
+            "--ecc",
+            "--fullchain-file",
+            str(fullchain),
+            "--key-file",
+            str(keyfile),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    if result.stdout:
+        log.info(f"Install output for {domain}:\n{result.stdout}")
+
+    if result.stderr:
+        log.info(f"Install stderr for {domain}:\n{result.stderr}")
+
+
+def build_haproxy_pem(
+    fullchain: Path,
+    keyfile: Path,
+    cert_dest: Path,
+) -> None:
+    pem_bytes = fullchain.read_bytes() + keyfile.read_bytes()
+
+    cert_dest.write_bytes(pem_bytes)
+    cert_dest.chmod(0o600)
+
+    log.info(f"HAProxy PEM written to {cert_dest}")
+
+
+def reload_haproxy() -> None:
+    result = subprocess.run(
+        ["systemctl", "reload", "haproxy"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    log.info("HAProxy reloaded successfully.")
+
+    if result.stdout:
+        log.info(result.stdout)
+
+    if result.stderr:
+        log.info(result.stderr)
+
+
+def renew_domain(acme_sh: Path, home: Path, domain: str) -> bool:
+    renewed = renew_certificate(acme_sh, domain)
+
+    if not renewed:
+        return False
+
+    paths = get_certificate_paths(home, domain)
+
+    install_certificate(
+        acme_sh,
+        domain,
+        paths["fullchain"],
+        paths["keyfile"],
+    )
+
+    build_haproxy_pem(
+        paths["fullchain"],
+        paths["keyfile"],
+        paths["cert_dest"],
+    )
+
+    return True
+
+
+def main() -> None:
+    env_file = Path(__file__).with_name(".env")
+    load_dotenv(env_file)
+
+    domains_str = os.getenv("DOMAINS", "[]")
+
     try:
-        install = subprocess.run(
-            [
-                str(acme_sh),
-                "--install-cert",
-                "-d",
-                domain,
-                "--ecc",
-                "--fullchain-file",
-                str(fullchain),
-                "--key-file",
-                str(keyfile),
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        domains = json.loads(domains_str)
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            "DOMAINS is not in the correct format. It should be a JSON array string."
+        ) from e
 
-        if install.stdout:
-            log.info(f"Install output for {domain}:\n{install.stdout}")
+    home = Path(os.environ["HOME"])
+    acme_sh = home / ".acme.sh" / "acme.sh"
 
-        if install.stderr:
-            log.info(f"Install stderr for {domain}:\n{install.stderr}")
+    log.info(f"Domains: {domains}")
+    log.info(f"Home: {home}")
+    log.info(f"acme.sh: {acme_sh}")
 
-    except subprocess.CalledProcessError as e:
-        log.error(
-            f"Install failed for {domain} "
-            f"(exit code {e.returncode}):\n{e.stderr}"
-        )
-        had_errors = True
-        continue
+    had_errors = False
+    haproxy_needs_reload = False
 
-    # 3) Build HAProxy PEM
-    try:
-        pem_bytes = fullchain.read_bytes() + keyfile.read_bytes()
-        cert_dest.write_bytes(pem_bytes)
-        cert_dest.chmod(0o600)
+    for domain in domains:
+        try:
+            if renew_domain(acme_sh, home, domain):
+                haproxy_needs_reload = True
 
-        log.info(
-            f"HAProxy PEM written for {domain} to {cert_dest}"
-        )
+        except (RuntimeError, subprocess.CalledProcessError, OSError) as e:
+            log.error(f"Failed to process {domain}: {e}")
+            had_errors = True
 
-        haproxy_needs_reload = True
+    if haproxy_needs_reload:
+        try:
+            reload_haproxy()
+        except subprocess.CalledProcessError as e:
+            log.error(f"HAProxy reload failed (exit code {e.returncode}):\n{e.stderr}")
+            had_errors = True
 
-    except OSError as e:
-        log.error(f"Error creating HAProxy PEM for {domain}: {e}")
-        had_errors = True
-        continue
+    if had_errors:
+        sys.exit(1)
 
-if haproxy_needs_reload:
-    try:
-        reload_result = subprocess.run(
-            ["systemctl", "reload", "haproxy"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
 
-        log.info("HAProxy reloaded successfully.")
-
-        if reload_result.stdout:
-            log.info(reload_result.stdout)
-
-        if reload_result.stderr:
-            log.info(reload_result.stderr)
-
-    except subprocess.CalledProcessError as e:
-        log.error(
-            f"HAProxy reload failed "
-            f"(exit code {e.returncode}):\n{e.stderr}"
-        )
-        had_errors = True
-
-if had_errors:
-    sys.exit(1)
+if __name__ == "__main__":
+    main()
