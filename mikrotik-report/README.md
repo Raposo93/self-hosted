@@ -17,10 +17,15 @@ never enables per-packet logging.
 * Python 3.9 or newer, with timezone data for `MIKROTIK_REPORT_TIMEZONE`.
 * RouterOS 7 with `www-ssl` enabled, a certificate trusted by the collecting
   host, and a dedicated account permitted to read firewall rules, address lists,
-  and system resource data. Limit access to the collecting host at the router.
+  and system resource data. On the tested RouterOS 7.24.4 installation, a custom
+  group with `read,api,rest-api` worked; `read,rest-api` alone returned
+  `not allowed (9)`. Restrict the account to the collecting host with its
+  `address` setting (`10.1.1.11/32` in that installation; use the actual
+  collector address elsewhere).
 * `mail-notifier/send-mail.sh` in the same checkout, plus its configured `msmtp`
-  account on the collecting host. Its root-only SMTP configuration requires the
-  weekly report service to run as `root`.
+  account on the collecting host. Grant the weekly service's dedicated
+  `mail-notifier` group access to the SMTP configuration as described in the
+  [mail notifier setup](../mail-notifier/README.md#allow-a-non-root-service-to-send).
 
 Copy `.env.example` to a private `.env` and adapt every required value. The
 example selects the local `raw` rule by exact comment and source address list.
@@ -47,15 +52,15 @@ password; neither it nor the database belongs in Git.
 
 ## Installation
 
-The templates are examples; replace `/path/to/self-hosted` in both services and
-`YOUR_USER` in the collector service. Choose a collector user that can read
-`.env` and write the state directory. The collector's
-`StateDirectory=mikrotik-report` creates `/var/lib/mikrotik-report` for
-`MIKROTIK_REPORT_DB`. The weekly service runs as `root` so it can use the
-root-only SMTP configuration in `/etc/msmtprc`; it has no `StateDirectory` so
-systemd does not change ownership of the collector's directory. Root can read
-`.env` and update the collector-owned SQLite file. Set the timezone in `.env`
-to the intended reporting timezone, for example `Europe/Madrid`.
+The templates are examples; replace `/path/to/self-hosted` and `YOUR_USER` in
+both services. Choose a user that can read `.env` and write the state directory.
+The collector's `StateDirectory=mikrotik-report` creates
+`/var/lib/mikrotik-report` for `MIKROTIK_REPORT_DB`. Configure the SMTP group
+before enabling the weekly timer. The weekly service runs as the same
+unprivileged user with `mail-notifier` added only to its process. It has no
+`StateDirectory` so systemd does not change ownership of the collector's
+directory. Set the timezone in `.env` to the intended reporting timezone, for
+example `Europe/Madrid`.
 If the weekly timer runs before the first collection, it exits without creating
 the database; the collector creates it under its own user.
 
@@ -63,7 +68,7 @@ the database; the collector creates it under its own user.
 cd /path/to/self-hosted/mikrotik-report
 cp .env.example .env
 chmod 600 .env
-# Edit .env and the service paths; set YOUR_USER in the collector service.
+# Edit .env and both service templates for this host.
 sudo install -m 644 mikrotik-report-collect.service.example /etc/systemd/system/mikrotik-report-collect.service
 sudo install -m 644 mikrotik-report-collect.timer.example /etc/systemd/system/mikrotik-report-collect.timer
 sudo install -m 644 mikrotik-report-weekly.service.example /etc/systemd/system/mikrotik-report-weekly.service
@@ -71,6 +76,12 @@ sudo install -m 644 mikrotik-report-weekly.timer.example /etc/systemd/system/mik
 sudo systemctl daemon-reload
 sudo systemctl enable --now mikrotik-report-collect.timer mikrotik-report-weekly.timer
 ```
+
+For an existing installation where the weekly unit runs as `root`, first grant
+the SMTP group access described above. Then update the installed weekly unit to
+match the template while preserving its local user and paths, and run
+`sudo systemctl daemon-reload`. The collector unit and database ownership stay
+with the collector user.
 
 The collector timer first runs two minutes after boot, then five minutes after
 each activation. The report timer checks at 00:15 every day in the host's local
@@ -88,12 +99,18 @@ sudo systemctl start mikrotik-report-weekly.service
 sudo journalctl -u mikrotik-report-collect.service -u mikrotik-report-weekly.service -n 100
 ```
 
-To test the complete path before the week closes, run the manual test as
-`root`, like the weekly service, after at least one successful collection:
+To test the complete path before the week closes, run a transient service with
+the same user, group, and environment as the weekly service. Do this after at
+least one successful collection:
 
 ```bash
-cd /path/to/self-hosted/mikrotik-report
-sudo sh -c 'set -a; . ./.env; set +a; exec python3 mikrotik_report.py test-report'
+sudo systemd-run --wait --collect --pipe \
+  -p User=YOUR_USER \
+  -p Group=YOUR_USER \
+  -p SupplementaryGroups=mail-notifier \
+  -p WorkingDirectory=/path/to/self-hosted/mikrotik-report \
+  -p EnvironmentFile=/path/to/self-hosted/mikrotik-report/.env \
+  /usr/bin/python3 /path/to/self-hosted/mikrotik-report/mikrotik_report.py test-report
 ```
 
 `test-report` fetches a live RouterOS sample, reads the SQLite database in
@@ -145,3 +162,4 @@ RouterOS `www-ssl`, create an account, or install systemd units on a live host.
 
 RouterOS REST behavior and rule counters are documented by [MikroTik REST API](https://manual.mikrotik.com/docs/developer-guides/rest-api/)
 and [MikroTik firewall matchers](https://manual.mikrotik.com/docs/firewall-and-quality-of-service/firewall/common-firewall-matchers-and-actions/).
+The user group policies and address restriction are documented by [MikroTik User](https://manual.mikrotik.com/docs/authentication-authorization-accounting/user/).
