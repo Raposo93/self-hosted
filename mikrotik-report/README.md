@@ -23,8 +23,8 @@ never enables per-packet logging.
   `address` setting (`10.1.1.11/32` in that installation; use the actual
   collector address elsewhere).
 * `mail-notifier/send-mail.sh` in the same checkout, plus its configured `msmtp`
-  account on the collecting host. Grant the weekly service's dedicated
-  `mail-notifier` group access to the SMTP configuration as described in the
+  account on the collecting host. Grant the weekly service access to the SMTP
+  password through the dedicated `mail-notifier` group as described in the
   [mail notifier setup](../mail-notifier/README.md#allow-a-non-root-service-to-send).
 
 Copy `.env.example` to a private `.env` and adapt every required value. The
@@ -55,8 +55,8 @@ password; neither it nor the database belongs in Git.
 The templates are examples; replace `/path/to/self-hosted` and `YOUR_USER` in
 both services. Choose a user that can read `.env` and write the state directory.
 The collector's `StateDirectory=mikrotik-report` creates
-`/var/lib/mikrotik-report` for `MIKROTIK_REPORT_DB`. Configure the SMTP group
-before enabling the weekly timer. The weekly service runs as the same
+`/var/lib/mikrotik-report` for `MIKROTIK_REPORT_DB`. Configure SMTP password
+access before enabling the weekly timer. The weekly service runs as the same
 unprivileged user with `mail-notifier` added only to its process. It has no
 `StateDirectory` so systemd does not change ownership of the collector's
 directory. Set the timezone in `.env` to the intended reporting timezone, for
@@ -78,7 +78,7 @@ sudo systemctl enable --now mikrotik-report-collect.timer mikrotik-report-weekly
 ```
 
 For an existing installation where the weekly unit runs as `root`, first grant
-the SMTP group access described above. Then update the installed weekly unit to
+the weekly service SMTP password access through the group described above. Then update the installed weekly unit to
 match the template while preserving its local user and paths, and run
 `sudo systemctl daemon-reload`. The collector unit and database ownership stay
 with the collector user.

@@ -4,7 +4,7 @@
 
 Email metadata is passed as arguments, while the message body is read from
 standard input. It is intended for monitors, backups, and systemd tasks running
-as `root` or with explicit access to a dedicated SMTP group.
+as `root` or with explicit access to the dedicated SMTP password group.
 
 ## Install msmtp
 
@@ -18,7 +18,7 @@ sudo apt install msmtp ca-certificates
 Create the password file:
 
 ```bash
-sudo install -d -o root -g root -m 700 /etc/msmtp
+sudo install -d -o root -g root -m 755 /etc/msmtp
 
 sudo install \
     -o root \
@@ -42,7 +42,7 @@ Create `/etc/msmtprc`:
 sudo install \
     -o root \
     -g root \
-    -m 600 \
+    -m 644 \
     /dev/null \
     /etc/msmtprc
 
@@ -82,23 +82,34 @@ tls_starttls off
 
 ## Allow a non-root service to send
 
-The default files are readable only by `root`. To allow a service such as
-`mikrotik-report-weekly` to use the configured account without running its
-checkout scripts as `root`, create a dedicated group and grant it read access
-to both the system configuration and the password file. The group also needs
-traverse access to the password file's parent directory:
+Keep the global configuration non-secret: `/etc/msmtprc` stays
+`644 root:root` and `/etc/msmtp` stays `755 root:root`. Only the password
+file needs restricted access.
+
+To allow a non-root process to use the configured account, create a dedicated
+group and grant that group read access only to the password file:
 
 ```bash
 sudo groupadd --system mail-notifier
-sudo chown root:mail-notifier /etc/msmtprc /etc/msmtp /etc/msmtp/notifications.password
-sudo chmod 640 /etc/msmtprc /etc/msmtp/notifications.password
-sudo chmod 710 /etc/msmtp
+sudo chown root:mail-notifier /etc/msmtp/notifications.password
+sudo chmod 640 /etc/msmtp/notifications.password
 ```
 
-Adapt the password path if `passwordeval` points elsewhere. Add
-`SupplementaryGroups=mail-notifier` to only the service units that should send
-mail; their `User=` can remain unprivileged. Anyone in this group can read the
-SMTP configuration and password, so limit which services receive it.
+Adapt the password path if `passwordeval` points elsewhere.
+
+For a regular user or a cron job, add only the account that needs to send mail:
+
+```bash
+sudo usermod -aG mail-notifier USER
+```
+
+Start a new login session before testing the new supplementary group. For
+systemd services, prefer `SupplementaryGroups=mail-notifier` in only the units
+that need SMTP access; their `User=` can remain unprivileged without granting
+the login account permanent group membership.
+
+Anyone with the `mail-notifier` group can read the SMTP password, so keep group
+membership limited.
 
 ## Test the configuration
 
@@ -142,8 +153,8 @@ send-mail.sh --to ADDRESS --subject SUBJECT [OPTIONS]
 `--to` and `--subject` are required. The message body must be provided
 through standard input.
 
-The manual examples use `sudo` for the default root-only configuration.
-Services running as `root` or with the dedicated SMTP group do not need it.
+The manual examples use `sudo` while the password file is root-only.
+Processes running as `root` or with the `mail-notifier` group do not need it.
 
 ### Send a variable
 
@@ -210,6 +221,8 @@ The helper only sends plain-text messages. It does not support HTML,
 attachments, CC, or BCC.
 
 Do not store credentials in Git or include them directly in scripts. Keep
-`/etc/msmtprc` and the password file at `600 root:root` by default, or at
-`640 root:mail-notifier` when a non-root service needs access. Keep the
-password directory at `700 root:root` or `710 root:mail-notifier`, respectively.
+`/etc/msmtprc` at `644 root:root` and free of secrets. Keep
+`/etc/msmtp/notifications.password` at `600 root:root` by default, or
+`640 root:mail-notifier` when non-root processes need SMTP access. The
+`/etc/msmtp` directory can remain `755 root:root` because the password file
+itself enforces access.

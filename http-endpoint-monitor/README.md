@@ -28,6 +28,8 @@ The following commands must be available:
 * `mktemp`
 * `msmtp`, required by `mail-notifier/send-mail.sh`, with the account
   passed to `--account` already configured
+* permission to read the shared SMTP password; for a non-root cron user, follow
+  the [mail notifier group setup](../mail-notifier/README.md#allow-a-non-root-service-to-send)
 
 The monitor also requires the shared mail notifier to exist and be executable:
 
@@ -227,7 +229,9 @@ A single temporary failure does not send an email unless it reaches the configur
 The recipient address, sender address, and msmtp account are required.
 
 The script delegates email delivery to `mail-notifier/send-mail.sh`, and the
-selected msmtp account must already be configured.
+selected msmtp account must already be configured. If the monitor runs as a
+non-root user, that user must have access to the SMTP password through the
+`mail-notifier` group or an equivalent local permission setup.
 
 Alerts are also written to the system log using:
 
