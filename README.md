@@ -61,6 +61,10 @@ This repository is intended to store deployment definitions and reusable scripts
 
 ## Usage
 
+Run local repository checks with `./check.sh`. It checks Git diffs, Bash and
+Python syntax, Python tests, and systemd units. It also runs `shellcheck` when
+installed. It does not contact production hosts or require private `.env` files.
+
 Enter the directory of the service or tool you want to manage and review its files before running anything.
 
 For Docker Compose based services:
