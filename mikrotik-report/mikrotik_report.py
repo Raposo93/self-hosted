@@ -297,6 +297,12 @@ def _open_database(path: Path) -> sqlite3.Connection:
     return database
 
 
+def _open_database_readonly(path: Path) -> sqlite3.Connection:
+    database = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=30)
+    database.row_factory = sqlite3.Row
+    return database
+
+
 def _period_from_row(row: sqlite3.Row) -> _Period:
     period = _empty_period(row["start"])
     for source in SOURCES:
@@ -466,21 +472,30 @@ def _render_report(period: _Period, tz: ZoneInfo) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _send_report(cfg: dict[str, Any], period: _Period) -> None:
+def _send_report(
+    cfg: dict[str, Any], period: _Period, preview_at: datetime | None = None
+) -> None:
+    subject = f"{cfg['subject']} ({period['start']})"
+    body = _render_report(period, cfg["timezone"])
+    if preview_at is not None:
+        subject = f"[TEST] {subject}"
+        body = (
+            "TEST PREVIEW — incomplete reporting week.\n"
+            f"Live RouterOS sample: {preview_at.isoformat()}\n"
+            "SQLite state and scheduled reports were not changed.\n\n" + body
+        )
     command = [
         str(cfg["notifier"]),
         "--to",
         cfg["recipient"],
         "--subject",
-        f"{cfg['subject']} ({period['start']})",
+        subject,
     ]
     if cfg["account"]:
         command.extend(("--account", cfg["account"]))
     if cfg["from"]:
         command.extend(("--from", cfg["from"]))
-    subprocess.run(
-        command, input=_render_report(period, cfg["timezone"]), text=True, check=True
-    )
+    subprocess.run(command, input=body, text=True, check=True)
 
 
 def _process_report(
@@ -519,17 +534,33 @@ def _collect(cfg: dict[str, Any], now: datetime) -> None:
         )
 
 
+def _test_report(cfg: dict[str, Any], now: datetime) -> None:
+    if not cfg["state"].is_file():
+        raise ValueError("Run collect before sending a test report")
+    snapshot = _fetch_snapshot(cfg)
+    with closing(_open_database_readonly(cfg["state"])) as database:
+        state = _load_state(database, _week_start(now, cfg["timezone"]))
+    if state["last_sample_at"] is None:
+        raise ValueError("Run collect before sending a test report")
+    _apply_snapshot(state, snapshot, now, cfg["timezone"])
+    _send_report(cfg, state["period"], preview_at=now)
+    print(f"Sent test report for week {state['period']['start']} (state unchanged)")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("collect", "report"))
+    parser.add_argument("command", choices=("collect", "report", "test-report"))
     args = parser.parse_args()
     now = datetime.now(timezone.utc)
     if args.command == "collect":
         _collect(_config(), now)
-    else:
+    elif args.command == "report":
         cfg = _config(report=True)
         with closing(_open_database(cfg["state"])) as database:
             _process_report(database, cfg, now)
+    else:
+        cfg = {**_config(), **_config(report=True)}
+        _test_report(cfg, now)
 
 
 if __name__ == "__main__":

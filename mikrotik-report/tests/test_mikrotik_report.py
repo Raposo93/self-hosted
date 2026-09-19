@@ -197,6 +197,45 @@ class ReportTests(unittest.TestCase):
                     report._load_state(database, "2026-09-21")["pending"], []
                 )
 
+    def test_test_report_sends_live_preview_without_changing_sqlite(self) -> None:
+        state = report._initial_state("2026-09-14")
+        report._apply_snapshot(
+            state, _sample(100, 10000, uptime=10000), _at(19, 10), UTC
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "report.sqlite3"
+            with closing(report._open_database(path)) as database, database:
+                report._save_state(database, state)
+            cfg = {
+                "state": path,
+                "timezone": UTC,
+                "notifier": Path(temporary) / "send-mail.sh",
+                "recipient": "test@example.net",
+                "subject": "MikroTik report",
+                "account": "test-account",
+                "from": "",
+            }
+            with (
+                patch.object(
+                    report,
+                    "_fetch_snapshot",
+                    return_value=_sample(130, 13000, uptime=13600),
+                ) as fetch,
+                patch.object(report.subprocess, "run") as mailer,
+                redirect_stdout(StringIO()),
+            ):
+                report._test_report(cfg, _at(19, 11))
+            fetch.assert_called_once_with(cfg)
+            mailer.assert_called_once()
+            args, kwargs = mailer.call_args
+            subject = args[0][args[0].index("--subject") + 1]
+            self.assertEqual(subject, "[TEST] MikroTik report (2026-09-14)")
+            self.assertIn("--account", args[0])
+            self.assertIn("TEST PREVIEW", kwargs["input"])
+            self.assertIn("Packets dropped: 30", kwargs["input"])
+            with closing(report._open_database_readonly(path)) as database:
+                self.assertEqual(report._load_state(database, "2026-09-14"), state)
+
 
 if __name__ == "__main__":
     unittest.main()

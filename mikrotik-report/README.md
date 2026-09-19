@@ -82,6 +82,25 @@ sudo systemctl start mikrotik-report-weekly.service
 sudo journalctl -u mikrotik-report-collect.service -u mikrotik-report-weekly.service -n 100
 ```
 
+To test the complete path before the week closes, run the manual test as the
+same user as the services, after at least one successful collection:
+
+```bash
+cd /path/to/self-hosted/mikrotik-report
+set -a
+. ./.env
+set +a
+python3 mikrotik_report.py test-report
+```
+
+`test-report` fetches a live RouterOS sample, reads the SQLite database in
+read-only mode, calculates a preview of the current incomplete week in memory,
+and sends it through `mail-notifier` to `MIKROTIK_REPORT_TO` with a `[TEST]`
+subject and a clear test banner. It does not update counters, close a week, or
+remove pending reports. Success prints `Sent test report`; a RouterOS or mail
+failure exits nonzero. The preview may include the latest observed counter
+delta, which the next scheduled collection will still record normally.
+
 The first collection establishes a baseline; it does not claim traffic that
 occurred before installation. Each later sample adds the difference from the
 previous value. A lower counter or a detected router reboot starts a new
