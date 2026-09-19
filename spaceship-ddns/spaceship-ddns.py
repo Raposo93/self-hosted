@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import ipaddress
 import json
 import logging
@@ -7,7 +5,8 @@ import os
 import sys
 import urllib.error
 import urllib.request
-
+from collections.abc import Mapping
+from typing import cast
 
 PUBLIC_IP_URL = "https://api.ipify.org"
 SPACESHIP_BASE_URL = "https://spaceship.dev/api/v1/dns/records"
@@ -21,7 +20,7 @@ logging.basicConfig(
 logger = logging.getLogger("spaceship-ddns")
 
 
-def get_required_env(name: str) -> str:
+def _get_required_env(name: str) -> str:
     value = os.getenv(name)
 
     if not value:
@@ -30,13 +29,13 @@ def get_required_env(name: str) -> str:
     return value
 
 
-def http_request(
+def _http_request(
     url: str,
     method: str = "GET",
-    headers: dict | None = None,
+    headers: Mapping[str, str] | None = None,
     data: object | None = None,
 ) -> str:
-    request_headers = headers.copy() if headers else {}
+    request_headers = dict(headers or {})
     request_headers["User-Agent"] = "spaceship-ddns/1.0"
 
     body = None
@@ -68,15 +67,13 @@ def http_request(
         ) from exc
 
 
-def get_public_ip() -> str:
-    raw_ip = http_request(PUBLIC_IP_URL).strip()
+def _get_public_ip() -> str:
+    raw_ip = _http_request(PUBLIC_IP_URL).strip()
 
     try:
         ip = ipaddress.ip_address(raw_ip)
     except ValueError as exc:
-        raise RuntimeError(
-            f"Invalid public IP returned by ipify: {raw_ip!r}"
-        ) from exc
+        raise RuntimeError(f"Invalid public IP returned by ipify: {raw_ip!r}") from exc
 
     if ip.version != 4:
         raise RuntimeError(f"Expected IPv4 address, got: {ip}")
@@ -84,38 +81,41 @@ def get_public_ip() -> str:
     return str(ip)
 
 
-def get_headers() -> dict:
+def _get_headers() -> dict[str, str]:
     return {
-        "X-API-Key": get_required_env("SPACESHIP_API_KEY"),
-        "X-API-Secret": get_required_env("SPACESHIP_API_SECRET"),
+        "X-API-Key": _get_required_env("SPACESHIP_API_KEY"),
+        "X-API-Secret": _get_required_env("SPACESHIP_API_SECRET"),
     }
 
 
-def get_dns_records(headers: dict, domain: str) -> list[dict]:
+def _get_dns_records(
+    headers: Mapping[str, str], domain: str
+) -> list[dict[str, object]]:
     url = f"{SPACESHIP_BASE_URL}/{domain}?take=500&skip=0"
 
-    raw_response = http_request(
+    raw_response = _http_request(
         url=url,
         headers=headers,
     )
 
     try:
-        response = json.loads(raw_response)
+        response: object = json.loads(raw_response)
     except json.JSONDecodeError as exc:
         raise RuntimeError("Spaceship returned invalid JSON") from exc
 
+    if not isinstance(response, dict):
+        raise TypeError("Spaceship response must be an object")
+
     items = response.get("items")
 
-    if not isinstance(items, list):
-        raise RuntimeError(
-            "Spaceship response does not contain an items list"
-        )
+    if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
+        raise TypeError("Spaceship response does not contain an items list")
 
-    return items
+    return cast("list[dict[str, object]]", items)
 
 
-def add_a_record(
-    headers: dict,
+def _add_a_record(
+    headers: Mapping[str, str],
     domain: str,
     record_name: str,
     address: str,
@@ -135,7 +135,7 @@ def add_a_record(
         ],
     }
 
-    http_request(
+    _http_request(
         url=url,
         method="PUT",
         headers=headers,
@@ -143,8 +143,8 @@ def add_a_record(
     )
 
 
-def delete_a_records(
-    headers: dict,
+def _delete_a_records(
+    headers: Mapping[str, str],
     domain: str,
     record_name: str,
     addresses: list[str],
@@ -163,7 +163,7 @@ def delete_a_records(
         for address in addresses
     ]
 
-    http_request(
+    _http_request(
         url=url,
         method="DELETE",
         headers=headers,
@@ -172,7 +172,7 @@ def delete_a_records(
 
 
 def main() -> int:
-    domain = get_required_env("DOMAIN")
+    domain = _get_required_env("DOMAIN")
     record_name = os.getenv("RECORD_NAME", "@")
 
     try:
@@ -183,24 +183,23 @@ def main() -> int:
     if ttl <= 0:
         raise RuntimeError("TTL must be greater than zero")
 
-    headers = get_headers()
-    public_ip = get_public_ip()
+    headers = _get_headers()
+    public_ip = _get_public_ip()
 
     logger.info("Current public IP: %s", public_ip)
 
-    records = get_dns_records(headers, domain)
+    records = _get_dns_records(headers, domain)
 
     a_records = [
         record
         for record in records
-        if record.get("type") == "A"
-        and record.get("name") == record_name
+        if record.get("type") == "A" and record.get("name") == record_name
     ]
 
     addresses = [
-        record.get("address")
+        address
         for record in a_records
-        if record.get("address")
+        if isinstance(address := record.get("address"), str) and address
     ]
 
     logger.info(
@@ -219,7 +218,7 @@ def main() -> int:
             public_ip,
         )
 
-        add_a_record(
+        _add_a_record(
             headers,
             domain,
             record_name,
@@ -229,18 +228,14 @@ def main() -> int:
 
         logger.info("Added current IP successfully")
 
-    obsolete_addresses = [
-        address
-        for address in addresses
-        if address != public_ip
-    ]
+    obsolete_addresses = [address for address in addresses if address != public_ip]
 
     if obsolete_addresses:
         logger.info(
             "Removing obsolete IPs: %s",
             ", ".join(obsolete_addresses),
         )
-        delete_a_records(
+        _delete_a_records(
             headers,
             domain,
             record_name,
@@ -257,6 +252,6 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except Exception as exc:
+    except (RuntimeError, TypeError, OSError) as exc:
         logger.error("%s", exc)
         sys.exit(1)
