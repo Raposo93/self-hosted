@@ -65,6 +65,10 @@ if ((${#PYTHON_SCRIPTS[@]} > 0)); then
     export PYTHONPYCACHEPREFIX
     "$PROJECT_PYTHON" -m py_compile "${PYTHON_SCRIPTS[@]}"
     "$PROJECT_PYTHON" -m unittest discover -s mikrotik-report/tests -v
+    echo "Checking Python lint, formatting, and types..."
+    "$PROJECT_PYTHON" -m ruff check .
+    "$PROJECT_PYTHON" -m ruff format --check .
+    "$PROJECT_PYTHON" -m pyright
 fi
 
 mapfile -d '' -t SYSTEMD_UNITS < <(
