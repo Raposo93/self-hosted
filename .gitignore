@@ -17,6 +17,8 @@ acme.json
 firefly/firefly_iii_db/
 firefly/firefly_iii_upload/
 http-endpoint-monitor/state/
+mikrotik-report/state/
+mikrotik-report/*.sqlite*
 jellyfin/cache/
 jellyfin/config/
 navidrome/data/

@@ -1,0 +1,10 @@
+[Unit]
+Description=Send completed MikroTik reports and retry pending mail daily
+
+[Timer]
+OnCalendar=*-*-* 00:15:00
+Persistent=true
+Unit=mikrotik-report-weekly.service
+
+[Install]
+WantedBy=timers.target

@@ -27,6 +27,7 @@ This repository contains Docker Compose setups and helper scripts used to run an
 | `acme_certificate_installer/` | ACME certificate installation helper |
 | `http-endpoint-monitor/` | HTTP endpoint monitoring and alerts |
 | `mail-notifier/` | Shared email notification helper |
+| `mikrotik-report/` | MikroTik blocking counter collector and weekly email report |
 | `pbc/` | Proxmox Backup Client scripts |
 | `shutdown-delayed/` | Delayed graphical shutdown helper |
 | `spaceship-ddns/` | Spaceship dynamic DNS updater |
