@@ -1,8 +1,8 @@
 # self-hosted
 
-Personal self-hosted services, deployment files and maintenance scripts.
+Personal self-hosted services, deployment files, infrastructure configuration and maintenance scripts.
 
-This repository contains Docker Compose setups and helper scripts used to run and maintain services on a private server.
+This repository contains Docker Compose setups, system configuration examples and helper scripts used to run and maintain services on a private server.
 
 ## Contents
 
@@ -20,11 +20,19 @@ This repository contains Docker Compose setups and helper scripts used to run an
 | `vikunja/` | Vikunja deployment and helper scripts |
 | `wikijs/` | Wiki.js deployment |
 
+### Infrastructure
+
+| Path | Purpose |
+| --- | --- |
+| `haproxy/` | Standard HAProxy configuration, host map and HTTP-01 integration |
+| `acme_haproxy/` | ACME certificate issuance, renewal and deployment for HAProxy |
+
+`haproxy/` and `acme_haproxy/` are designed to work together. The HAProxy host map is the source of truth for published domains and ACME certificate management.
+
 ### Utilities
 
 | Path | Purpose |
 | --- | --- |
-| `acme_certificate_installer/` | ACME certificate installation helper |
 | `http-endpoint-monitor/` | HTTP endpoint monitoring and alerts |
 | `mail-notifier/` | Shared email notification helper |
 | `mikrotik-report/` | MikroTik blocking counter collector and weekly email report |
@@ -90,7 +98,13 @@ Some scripts may require root permissions, systemd, local credentials or extra c
 
 Backup-related scripts live under `pbc/`.
 
-Review `pbc/.env.example`, copy it to `.env`, adapt the values and keep `.env` untracked.
+Each backup profile uses its own environment file. Review `pbc/.env.example` and copy it to `pbc/.env.<profile>`, for example:
+
+```bash
+cp pbc/.env.example pbc/.env.photos
+```
+
+Adapt the values for the profile and keep `.env.*` files untracked.
 
 ## Notes
 
