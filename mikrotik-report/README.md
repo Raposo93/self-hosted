@@ -19,7 +19,8 @@ never enables per-packet logging.
   host, and a dedicated account permitted to read firewall rules, address lists,
   and system resource data. Limit access to the collecting host at the router.
 * `mail-notifier/send-mail.sh` in the same checkout, plus its configured `msmtp`
-  account on the collecting host. The service user must be able to use it.
+  account on the collecting host. Its root-only SMTP configuration requires the
+  weekly report service to run as `root`.
 
 Copy `.env.example` to a private `.env` and adapt every required value. The
 example selects the local `raw` rule by exact comment and source address list.
@@ -46,18 +47,23 @@ password; neither it nor the database belongs in Git.
 
 ## Installation
 
-The templates are examples; replace `YOUR_USER` and `/path/to/self-hosted` in
-both services. Choose a user that can read `.env`, write the state directory,
-and use the configured `msmtp` account. The templates use systemd's
-`StateDirectory=mikrotik-report`, which creates `/var/lib/mikrotik-report`
-for `MIKROTIK_REPORT_DB`. Set the timezone in `.env` to the intended reporting
-timezone, for example `Europe/Madrid`.
+The templates are examples; replace `/path/to/self-hosted` in both services and
+`YOUR_USER` in the collector service. Choose a collector user that can read
+`.env` and write the state directory. The collector's
+`StateDirectory=mikrotik-report` creates `/var/lib/mikrotik-report` for
+`MIKROTIK_REPORT_DB`. The weekly service runs as `root` so it can use the
+root-only SMTP configuration in `/etc/msmtprc`; it has no `StateDirectory` so
+systemd does not change ownership of the collector's directory. Root can read
+`.env` and update the collector-owned SQLite file. Set the timezone in `.env`
+to the intended reporting timezone, for example `Europe/Madrid`.
+If the weekly timer runs before the first collection, it exits without creating
+the database; the collector creates it under its own user.
 
 ```bash
 cd /path/to/self-hosted/mikrotik-report
 cp .env.example .env
 chmod 600 .env
-# Edit .env and the two .service.example files for this host.
+# Edit .env and the service paths; set YOUR_USER in the collector service.
 sudo install -m 644 mikrotik-report-collect.service.example /etc/systemd/system/mikrotik-report-collect.service
 sudo install -m 644 mikrotik-report-collect.timer.example /etc/systemd/system/mikrotik-report-collect.timer
 sudo install -m 644 mikrotik-report-weekly.service.example /etc/systemd/system/mikrotik-report-weekly.service
@@ -82,15 +88,12 @@ sudo systemctl start mikrotik-report-weekly.service
 sudo journalctl -u mikrotik-report-collect.service -u mikrotik-report-weekly.service -n 100
 ```
 
-To test the complete path before the week closes, run the manual test as the
-same user as the services, after at least one successful collection:
+To test the complete path before the week closes, run the manual test as
+`root`, like the weekly service, after at least one successful collection:
 
 ```bash
 cd /path/to/self-hosted/mikrotik-report
-set -a
-. ./.env
-set +a
-python3 mikrotik_report.py test-report
+sudo sh -c 'set -a; . ./.env; set +a; exec python3 mikrotik_report.py test-report'
 ```
 
 `test-report` fetches a live RouterOS sample, reads the SQLite database in

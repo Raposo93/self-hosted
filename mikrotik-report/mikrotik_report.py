@@ -303,6 +303,12 @@ def _open_database_readonly(path: Path) -> sqlite3.Connection:
     return database
 
 
+def _open_database_existing(path: Path) -> sqlite3.Connection:
+    database = sqlite3.connect(f"{path.as_uri()}?mode=rw", uri=True, timeout=30)
+    database.row_factory = sqlite3.Row
+    return database
+
+
 def _period_from_row(row: sqlite3.Row) -> _Period:
     period = _empty_period(row["start"])
     for source in SOURCES:
@@ -534,6 +540,13 @@ def _collect(cfg: dict[str, Any], now: datetime) -> None:
         )
 
 
+def _report(cfg: dict[str, Any], now: datetime) -> None:
+    if not cfg["state"].is_file():
+        return
+    with closing(_open_database_existing(cfg["state"])) as database:
+        _process_report(database, cfg, now)
+
+
 def _test_report(cfg: dict[str, Any], now: datetime) -> None:
     if not cfg["state"].is_file():
         raise ValueError("Run collect before sending a test report")
@@ -555,9 +568,7 @@ def main() -> None:
     if args.command == "collect":
         _collect(_config(), now)
     elif args.command == "report":
-        cfg = _config(report=True)
-        with closing(_open_database(cfg["state"])) as database:
-            _process_report(database, cfg, now)
+        _report(_config(report=True), now)
     else:
         cfg = {**_config(), **_config(report=True)}
         _test_report(cfg, now)

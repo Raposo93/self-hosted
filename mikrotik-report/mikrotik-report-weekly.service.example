@@ -5,9 +5,8 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-User=YOUR_USER
-Group=YOUR_USER
+User=root
+Group=root
 WorkingDirectory=/path/to/self-hosted/mikrotik-report
 EnvironmentFile=/path/to/self-hosted/mikrotik-report/.env
-StateDirectory=mikrotik-report
 ExecStart=/usr/bin/python3 /path/to/self-hosted/mikrotik-report/mikrotik_report.py report

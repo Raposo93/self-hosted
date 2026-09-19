@@ -197,6 +197,12 @@ class ReportTests(unittest.TestCase):
                     report._load_state(database, "2026-09-21")["pending"], []
                 )
 
+    def test_report_before_first_collection_does_not_create_database(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "state" / "report.sqlite3"
+            report._report({"state": path, "timezone": UTC}, _at(21, 1))
+            self.assertFalse(path.parent.exists())
+
     def test_test_report_sends_live_preview_without_changing_sqlite(self) -> None:
         state = report._initial_state("2026-09-14")
         report._apply_snapshot(
