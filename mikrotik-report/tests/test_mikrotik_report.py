@@ -2,7 +2,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import closing, redirect_stdout
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -186,6 +186,7 @@ class ReportTests(unittest.TestCase):
             with closing(report._open_database(path)) as database, database:
                 pending = report._load_state(database, "2026-09-21")["pending"]
                 self.assertEqual([item["start"] for item in pending], ["2026-09-14"])
+                self.assertEqual(report._load_history(database, "2026-09-21"), {})
                 with (
                     patch.object(report, "_send_report") as sender,
                     redirect_stdout(StringIO()),
@@ -196,6 +197,122 @@ class ReportTests(unittest.TestCase):
                 self.assertEqual(
                     report._load_state(database, "2026-09-21")["pending"], []
                 )
+                self.assertEqual(
+                    report._load_history(database, "2026-09-21")["2026-09-14"],
+                    pending[0],
+                )
+
+    def test_weekly_comparison_zero_baseline_and_missing_history(self) -> None:
+        previous = report._empty_period("2026-09-14")
+        current = report._empty_period("2026-09-21")
+        previous["samples"] = current["samples"] = 2016
+        current["totals"]["local"]["packets"] = 50
+        current["totals"]["local"]["bytes"] = 5000
+        current["totals"]["crowdsec"]["packets"] = 20
+        previous["totals"]["crowdsec"]["packets"] = 10
+        current["last_sizes"]["local"] = 4
+        previous["last_sizes"]["local"] = 2
+        rendered = report._render_report(current, UTC, {previous["start"]: previous})
+        self.assertIn("Local packets: 50 vs 0; +50 (n/a (zero baseline), up)", rendered)
+        self.assertIn("CrowdSec packets: 20 vs 10; +10 (+100.0%, up)", rendered)
+        self.assertIn("Local latest list size: 4 vs 2; +2 (+100.0%, up)", rendered)
+        self.assertIn("Samples: 2,016 / ~2,016 expected", rendered)
+        self.assertIn("Coverage: ~100.0%", rendered)
+        self.assertIn("2026-09-07: unavailable (no retained history)", rendered)
+        self.assertIn("2026-09-14: local 0 packets", rendered)
+        missing = report._render_report(current, UTC)
+        self.assertIn("previous calendar week has no retained history", missing)
+
+    def test_low_coverage_history_is_not_compared_as_zero(self) -> None:
+        previous = report._empty_period("2026-09-14")
+        current = report._empty_period("2026-09-21")
+        previous["samples"] = 40
+        current["samples"] = 2016
+        rendered = report._render_report(current, UTC, {previous["start"]: previous})
+        self.assertIn("previous calendar week has low sample coverage", rendered)
+        self.assertIn(
+            "2026-09-14: unavailable (low coverage: 40 / ~2,016, ~2.0%)", rendered
+        )
+        self.assertNotIn("Local packets: 0 vs 0", rendered)
+
+    def test_expected_samples_follow_calendar_week_and_daylight_saving(self) -> None:
+        madrid = ZoneInfo("Europe/Madrid")
+        boundary = datetime(2026, 9, 20, 22, 30, tzinfo=timezone.utc)
+        self.assertEqual(report._week_start(boundary, UTC), "2026-09-14")
+        self.assertEqual(report._week_start(boundary, madrid), "2026-09-21")
+        self.assertEqual(report._expected_samples("2026-09-21", madrid), 2016)
+        self.assertEqual(report._expected_samples("2026-10-19", madrid), 2028)
+        self.assertEqual(report._expected_samples("2026-03-23", madrid), 2004)
+
+    def test_sent_week_history_survives_reopen_and_is_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "report.sqlite3"
+            with closing(report._open_database(path)) as database, database:
+                for week in range(15):
+                    start = datetime(2026, 1, 5, tzinfo=timezone.utc).date()
+                    period = report._empty_period(
+                        (start + timedelta(days=week * 7)).isoformat()
+                    )
+                    period["samples"] = 2016
+                    report._retain_sent_week(database, period)
+            with closing(report._open_database_existing(path)) as database:
+                rows = database.execute(
+                    "SELECT start FROM weekly_history ORDER BY start"
+                ).fetchall()
+                self.assertEqual(len(rows), report.HISTORY_WEEKS)
+                self.assertEqual(rows[0]["start"], "2026-01-26")
+                self.assertEqual(len(report._load_history(database, "2026-04-13")), 3)
+
+    def test_next_report_uses_previously_sent_week_after_reopen(self) -> None:
+        first = report._initial_state("2026-09-14")
+        first["period"]["samples"] = 2016
+        first["period"]["totals"]["local"]["packets"] = 10
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "report.sqlite3"
+            cfg = {"timezone": UTC}
+            with closing(report._open_database(path)) as database, database:
+                report._save_state(database, first)
+            with (
+                closing(report._open_database_existing(path)) as database,
+                patch.object(report, "_send_report"),
+                redirect_stdout(StringIO()),
+            ):
+                report._process_report(database, cfg, _at(21, 1))
+            with closing(report._open_database_existing(path)) as database, database:
+                state = report._load_state(database, "2026-09-21")
+                state["period"]["samples"] = 2016
+                state["period"]["totals"]["local"]["packets"] = 20
+                report._save_state(database, state)
+            with (
+                closing(report._open_database_existing(path)) as database,
+                patch.object(report, "_send_report") as sender,
+                redirect_stdout(StringIO()),
+            ):
+                report._process_report(
+                    database, cfg, datetime(2026, 9, 28, 1, tzinfo=timezone.utc)
+                )
+                history = sender.call_args.kwargs["history"]
+                self.assertEqual(
+                    history["2026-09-14"]["totals"]["local"]["packets"], 10
+                )
+                current = sender.call_args.args[1]
+                self.assertIn(
+                    "Local packets: 20 vs 10; +10 (+100.0%, up)",
+                    report._render_report(current, UTC, history),
+                )
+
+    def test_existing_database_gets_history_table_without_losing_state(self) -> None:
+        state = report._initial_state("2026-09-14")
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "report.sqlite3"
+            with closing(report._open_database(path)) as database, database:
+                report._save_state(database, state)
+                database.execute("DROP TABLE weekly_history")
+            with closing(report._open_database_readonly(path)) as database:
+                self.assertEqual(report._load_history(database, "2026-09-21"), {})
+            with closing(report._open_database_existing(path)) as database:
+                self.assertEqual(report._load_state(database, "2026-09-14"), state)
+                self.assertEqual(report._load_history(database, "2026-09-21"), {})
 
     def test_report_before_first_collection_does_not_create_database(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

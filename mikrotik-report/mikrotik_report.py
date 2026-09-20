@@ -15,13 +15,16 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from contextlib import closing
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, TypedDict, cast
 from zoneinfo import ZoneInfo
 
 SOURCES = ("local", "crowdsec")
 METRICS = ("packets", "bytes")
+COLLECTION_INTERVAL_SECONDS = 5 * 60
+HISTORY_WEEKS = 12
+MIN_COMPARABLE_COVERAGE = 0.90
 RULE_FIELDS = ".id,comment,action,src-address-list,packets,bytes,disabled,invalid"
 UPTIME_PART = re.compile(r"(\d+)([ywdhms])")
 
@@ -293,6 +296,10 @@ def _open_database(path: Path) -> sqlite3.Connection:
             counter_resets INTEGER NOT NULL,
             rule_rebaselines INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS weekly_history (
+            start TEXT PRIMARY KEY,
+            data TEXT NOT NULL
+        );
     """)
     return database
 
@@ -306,7 +313,35 @@ def _open_database_readonly(path: Path) -> sqlite3.Connection:
 def _open_database_existing(path: Path) -> sqlite3.Connection:
     database = sqlite3.connect(f"{path.as_uri()}?mode=rw", uri=True, timeout=30)
     database.row_factory = sqlite3.Row
+    database.execute(
+        "CREATE TABLE IF NOT EXISTS weekly_history (start TEXT PRIMARY KEY, data TEXT NOT NULL)"
+    )
     return database
+
+
+def _load_history(database: sqlite3.Connection, start: str) -> dict[str, _Period]:
+    # Older databases may not have been opened for writing since this table was added.
+    if not database.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'weekly_history'"
+    ).fetchone():
+        return {}
+    rows = database.execute(
+        "SELECT start, data FROM weekly_history WHERE start < ? ORDER BY start DESC LIMIT 3",
+        (start,),
+    ).fetchall()
+    return {row["start"]: cast("_Period", json.loads(row["data"])) for row in rows}
+
+
+def _retain_sent_week(database: sqlite3.Connection, period: _Period) -> None:
+    database.execute(
+        "INSERT INTO weekly_history (start, data) VALUES (?, ?)",
+        (period["start"], json.dumps(period, sort_keys=True)),
+    )
+    database.execute(
+        "DELETE FROM weekly_history WHERE start NOT IN "
+        "(SELECT start FROM weekly_history ORDER BY start DESC LIMIT ?)",
+        (HISTORY_WEEKS,),
+    )
 
 
 def _period_from_row(row: sqlite3.Row) -> _Period:
@@ -444,12 +479,114 @@ def _insert_period(database: sqlite3.Connection, status: str, period: _Period) -
     )
 
 
-def _render_report(period: _Period, tz: ZoneInfo) -> str:
+def _expected_samples(start: str, tz: ZoneInfo) -> int:
+    first_day = datetime.fromisoformat(start).date()
+    first = datetime.combine(first_day, time.min, tzinfo=tz)
+    end = datetime.combine(first_day + timedelta(days=7), time.min, tzinfo=tz)
+    seconds = (
+        end.astimezone(timezone.utc) - first.astimezone(timezone.utc)
+    ).total_seconds()
+    return round(seconds / COLLECTION_INTERVAL_SECONDS)
+
+
+def _coverage(period: _Period, tz: ZoneInfo) -> tuple[int, float]:
+    expected = _expected_samples(period["start"], tz)
+    return expected, 100 * period["samples"] / expected
+
+
+def _comparable(period: _Period, tz: ZoneInfo) -> bool:
+    expected, _ = _coverage(period, tz)
+    return period["samples"] >= expected * MIN_COMPARABLE_COVERAGE
+
+
+def _comparison_line(label: str, current: int, previous: int) -> str:
+    change = current - previous
+    direction = "up" if change > 0 else "down" if change < 0 else "steady"
+    percentage = f"{change / previous:+.1%}" if previous else "n/a (zero baseline)"
+    return (
+        f"  {label}: {current:,} vs {previous:,}; "
+        f"{change:+,} ({percentage}, {direction})"
+    )
+
+
+def _comparison_lines(
+    period: _Period, previous: _Period | None, tz: ZoneInfo
+) -> list[str]:
+    lines = ["Week over week (current vs previous)"]
+    if not _comparable(period, tz):
+        return lines + ["  Unavailable: current week has low sample coverage."]
+    if previous is None:
+        return lines + [
+            "  Unavailable: previous calendar week has no retained history."
+        ]
+    if not _comparable(previous, tz):
+        return lines + [
+            "  Unavailable: previous calendar week has low sample coverage."
+        ]
+    for source, label in (("local", "Local"), ("crowdsec", "CrowdSec")):
+        for metric in METRICS:
+            lines.append(
+                _comparison_line(
+                    f"{label} {metric}",
+                    period["totals"][source][metric],
+                    previous["totals"][source][metric],
+                )
+            )
+        for size, description in (
+            ("last_sizes", "latest list size"),
+            ("max_sizes", "maximum list size"),
+        ):
+            lines.append(
+                _comparison_line(
+                    f"{label} {description}",
+                    period[size][source],
+                    previous[size][source],
+                )
+            )
+    return lines
+
+
+def _trend_lines(
+    period: _Period, history: dict[str, _Period], tz: ZoneInfo
+) -> list[str]:
+    lines = ["Recent completed weeks (oldest to newest)"]
+    start = datetime.fromisoformat(period["start"]).date()
+    for offset in (3, 2, 1, 0):
+        week = (start - timedelta(days=7 * offset)).isoformat()
+        item = period if offset == 0 else history.get(week)
+        if item is None:
+            lines.append(f"  {week}: unavailable (no retained history)")
+            continue
+        expected, coverage = _coverage(item, tz)
+        if not _comparable(item, tz):
+            lines.append(
+                f"  {week}: unavailable (low coverage: "
+                f"{item['samples']:,} / ~{expected:,}, ~{coverage:.1f}%)"
+            )
+            continue
+        local = item["totals"]["local"]
+        crowdsec = item["totals"]["crowdsec"]
+        lines.append(
+            f"  {week}: local {local['packets']:,} packets / {local['bytes']:,} bytes; "
+            f"CrowdSec {crowdsec['packets']:,} packets / {crowdsec['bytes']:,} bytes; "
+            f"lists {item['last_sizes']['local']:,} / {item['last_sizes']['crowdsec']:,}; "
+            f"coverage ~{coverage:.1f}%"
+        )
+    return lines
+
+
+def _render_report(
+    period: _Period,
+    tz: ZoneInfo,
+    history: dict[str, _Period] | None = None,
+    *,
+    completed: bool = True,
+) -> str:
     start = datetime.fromisoformat(period["start"]).date()
     end = start + timedelta(days=7)
+    expected, coverage = _coverage(period, tz)
     lines = [
         f"MikroTik blocking report: {start} to {end} ({tz.key}, end exclusive)",
-        f"Collector samples: {period['samples']}",
         "",
         "Local MikroTik detection (wan-scanners or configured local list)",
         f"  Packets dropped: {period['totals']['local']['packets']:,}",
@@ -461,13 +598,28 @@ def _render_report(period: _Period, tz: ZoneInfo) -> str:
         f"  Bytes dropped: {period['totals']['crowdsec']['bytes']:,}",
         f"  Address list size, latest / observed maximum: {period['last_sizes']['crowdsec']} / {period['max_sizes']['crowdsec']}",
         "",
-        f"Detected router reboots: {period['router_reboots']}",
-        f"Other counter resets: {period['counter_resets']}",
-        f"New or recreated rule baselines: {period['rule_rebaselines']}",
+        "Data quality",
+        f"  Samples: {period['samples']:,} / ~{expected:,} expected",
+        f"  Coverage: ~{coverage:.1f}%",
+        f"  Router reboots: {period['router_reboots']}",
+        f"  Counter resets: {period['counter_resets']}",
+        f"  Rule rebaselines: {period['rule_rebaselines']}",
         "",
-        "Counters measure packets and bytes discarded by the selected rules, not unique IPs or attacks.",
-        "CrowdSec remains responsible for detecting and classifying attacks.",
     ]
+    if completed:
+        previous_start = (start - timedelta(days=7)).isoformat()
+        retained = history or {}
+        lines.extend(_comparison_lines(period, retained.get(previous_start), tz))
+        lines.append("")
+        lines.extend(_trend_lines(period, retained, tz))
+        lines.append("")
+    lines.extend(
+        (
+            "Counters measure packets and bytes discarded by the selected rules, not unique IPs or attacks.",
+            "CrowdSec remains responsible for detecting and classifying attacks.",
+            "Expected samples and coverage are approximate; comparisons require at least 90% sample coverage in both weeks.",
+        )
+    )
     if period["samples"] == 0:
         lines.extend(
             (
@@ -479,10 +631,15 @@ def _render_report(period: _Period, tz: ZoneInfo) -> str:
 
 
 def _send_report(
-    cfg: dict[str, Any], period: _Period, preview_at: datetime | None = None
+    cfg: dict[str, Any],
+    period: _Period,
+    preview_at: datetime | None = None,
+    history: dict[str, _Period] | None = None,
 ) -> None:
     subject = f"{cfg['subject']} ({period['start']})"
-    body = _render_report(period, cfg["timezone"])
+    body = _render_report(
+        period, cfg["timezone"], history, completed=preview_at is None
+    )
     if preview_at is not None:
         subject = f"[TEST] {subject}"
         body = (
@@ -520,9 +677,11 @@ def _process_report(
             database.commit()
             break
         period = state["pending"][0]
-        _send_report(cfg, period)
+        history = _load_history(database, period["start"])
+        _send_report(cfg, period, history=history)
         state["pending"].pop(0)
         _save_state(database, state)
+        _retain_sent_week(database, period)
         database.commit()
         print(f"Sent report for week {period['start']}")
 

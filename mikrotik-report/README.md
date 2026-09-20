@@ -45,7 +45,9 @@ list, and router uptime. Rule and list responses request only needed fields.
 The list requests return one minimal record per entry to determine their size.
 
 Use an absolute `MIKROTIK_REPORT_DB` path outside the checkout. The SQLite
-database contains only last counter values and current/pending weekly totals.
+database contains last counter values, current/pending weekly totals, and the
+last 12 successfully emailed weekly aggregates. It does not retain raw RouterOS
+responses or individual samples.
 The service user needs write access to its parent directory. The program sets
 the database file to mode `600`. Keep `.env` private as it contains the RouterOS
 password; neither it nor the database belongs in Git.
@@ -129,17 +131,37 @@ counting traffic that may have occurred before the collector saw it. If a rule
 disappears, its last baseline is discarded. The report includes observed
 router reboots, other counter resets, and new or recreated rule baselines.
 
-Weekly boundaries use `MIKROTIK_REPORT_TIMEZONE`; a counter difference is
-credited to the week in which its later sample occurs. Polling gaps, rules
+Weekly boundaries use `MIKROTIK_REPORT_TIMEZONE`: Monday 00:00 is inclusive and
+the following Monday 00:00 is exclusive. A counter difference is credited to
+the week in which its later sample occurs. Polling gaps, rules
 created and removed between samples, and a reset followed by a counter that
 already exceeds the old value without a detectable reboot can undercount or
-hide a reset. They cannot be reconstructed from periodic counters. The report
-shows the number of collector samples so missing coverage is visible. A week
-with no samples is not evidence of zero blocked traffic.
+hide a reset. They cannot be reconstructed from periodic counters. The report's
+data-quality block shows observed samples, approximately expected samples and
+coverage, router reboots, counter resets, and rule rebaselines. Expected samples
+use a nominal five-minute cadence and the actual duration of that calendar week
+in the configured timezone, including daylight-saving changes. Collection is
+not fixed to an exact wall-clock grid, so the percentage is an estimate and can
+slightly exceed 100% after manual collections. A week with no samples is not
+evidence of zero blocked traffic.
+
+The weekly email compares local and CrowdSec packet and byte totals, and the
+latest and observed maximum size of each address list, with the immediately
+preceding calendar week. Each comparison shows current and previous values,
+absolute and percentage changes, and direction. Percentage change is unavailable
+when the previous value is zero. A compact four-week trend lists traffic totals,
+latest list sizes, and coverage, with missing weeks shown explicitly. Both weeks
+must have at least 90% of the nominal sample count for a comparison; lower
+coverage is shown as unavailable rather than as zero. The trend applies the same
+rule. Router reboot, counter reset, and rule rebaseline counts are informational,
+not traffic metrics. Historical comparisons start becoming available after the
+first completed week has been emailed with sufficient coverage. Earlier reports
+are not reconstructed from current router counters.
 
 SQLite transactions serialize collection and reporting, and state survives
 host restarts. A completed week stays pending if email delivery fails; the
-report command exits nonzero and the next timer run retries. If the process
+report command exits nonzero and the next timer run retries. Its aggregate enters
+the bounded history only after successful delivery. If the process
 crashes after the mailer accepts a message but before SQLite records success,
 the next run can send that week again. No additional SMTP mechanism is used.
 
