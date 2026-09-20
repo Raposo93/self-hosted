@@ -308,11 +308,204 @@ class ReportTests(unittest.TestCase):
             with closing(report._open_database(path)) as database, database:
                 report._save_state(database, state)
                 database.execute("DROP TABLE weekly_history")
+                database.execute("DROP TABLE daily_aggregates")
+                database.execute("DROP TABLE monthly_reports")
             with closing(report._open_database_readonly(path)) as database:
                 self.assertEqual(report._load_history(database, "2026-09-21"), {})
             with closing(report._open_database_existing(path)) as database:
                 self.assertEqual(report._load_state(database, "2026-09-14"), state)
                 self.assertEqual(report._load_history(database, "2026-09-21"), {})
+                self.assertEqual(
+                    database.execute(
+                        "SELECT COUNT(*) FROM daily_aggregates"
+                    ).fetchone()[0],
+                    0,
+                )
+                self.assertEqual(
+                    database.execute("SELECT COUNT(*) FROM monthly_reports").fetchone()[
+                        0
+                    ],
+                    0,
+                )
+
+    def test_daily_aggregates_split_month_inside_the_same_week(self) -> None:
+        madrid = ZoneInfo("Europe/Madrid")
+        times = (
+            datetime(2026, 9, 30, 21, 45, tzinfo=timezone.utc),
+            datetime(2026, 9, 30, 21, 50, tzinfo=timezone.utc),
+            datetime(2026, 9, 30, 22, 10, tzinfo=timezone.utc),
+        )
+        snapshots = (
+            _sample(100, 10000, uptime=10000),
+            _sample(110, 11000, uptime=10300),
+            _sample(130, 13000, uptime=11500),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "report.sqlite3"
+            cfg = {"state": path, "timezone": madrid}
+            with patch.object(report, "_fetch_snapshot", side_effect=snapshots):
+                for instant in times:
+                    with redirect_stdout(StringIO()):
+                        report._collect(cfg, instant)
+            with closing(report._open_database_readonly(path)) as database:
+                september = report._aggregate_month(database, "2026-09-01")
+                october = report._aggregate_month(database, "2026-10-01")
+                weekly = report._load_state(database, "2026-09-28")["period"]
+                assert september is not None and october is not None
+                self.assertEqual(september["totals"]["local"]["packets"], 10)
+                self.assertEqual(october["totals"]["local"]["packets"], 20)
+                self.assertEqual(weekly["totals"]["local"]["packets"], 30)
+                self.assertEqual(september["samples"], 2)
+                self.assertEqual(october["samples"], 1)
+
+    def test_month_lengths_leap_year_year_boundary_and_dst(self) -> None:
+        madrid = ZoneInfo("Europe/Madrid")
+        self.assertEqual(report._next_month("2026-12-01"), "2027-01-01")
+        self.assertEqual(report._next_month("2024-02-01"), "2024-03-01")
+        self.assertEqual(
+            report._expected_samples_between("2024-02-01", "2024-03-01", madrid),
+            8352,
+        )
+        self.assertEqual(
+            report._expected_samples_between("2026-04-01", "2026-05-01", madrid),
+            8640,
+        )
+        self.assertEqual(
+            report._expected_samples_between("2026-10-01", "2026-11-01", madrid),
+            8940,
+        )
+        self.assertEqual(
+            report._expected_samples_between("2026-03-01", "2026-04-01", madrid),
+            8916,
+        )
+
+    def test_monthly_comparison_and_missing_history(self) -> None:
+        previous = report._empty_period("2026-08-01")
+        current = report._empty_period("2026-09-01")
+        previous["samples"] = 8928
+        current["samples"] = 8640
+        previous["totals"]["local"]["packets"] = 10
+        current["totals"]["local"]["packets"] = 30
+        current["totals"]["crowdsec"]["bytes"] = 100
+        rendered = report._render_monthly_report(current, previous, UTC)
+        self.assertIn("2026-09-01 to 2026-10-01 (UTC, end exclusive)", rendered)
+        self.assertIn("Month over month", rendered)
+        self.assertIn("Local packets: 30 vs 10; +20 (+200.0%, up)", rendered)
+        self.assertIn(
+            "CrowdSec bytes: 100 vs 0; +100 (n/a (zero baseline), up)", rendered
+        )
+        self.assertIn("Samples: 8,640 / ~8,640 expected", rendered)
+        self.assertIn(
+            "previous calendar month has no retained history",
+            report._render_monthly_report(current, None, UTC),
+        )
+        previous["samples"] = 20
+        self.assertIn(
+            "previous calendar month has low sample coverage",
+            report._render_monthly_report(current, previous, UTC),
+        )
+
+    def test_monthly_mail_failure_retries_without_duplicate(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "report.sqlite3"
+            day = report._empty_period("2026-09-15")
+            day["samples"] = 1
+            with closing(report._open_database(path)) as database, database:
+                report._save_day(database, day)
+            cfg = {"timezone": UTC}
+            now = datetime(2026, 10, 1, 1, tzinfo=timezone.utc)
+            with (
+                closing(report._open_database_existing(path)) as database,
+                patch.object(
+                    report, "_send_monthly_report", side_effect=OSError("mail failed")
+                ),
+                self.assertRaisesRegex(OSError, "mail failed"),
+            ):
+                report._process_monthly_report(database, cfg, now)
+            with (
+                closing(report._open_database_existing(path)) as database,
+                patch.object(report, "_send_monthly_report") as sender,
+                redirect_stdout(StringIO()),
+            ):
+                pending = database.execute(
+                    "SELECT start, sent_at FROM monthly_reports"
+                ).fetchall()
+                self.assertEqual(
+                    [(row["start"], row["sent_at"]) for row in pending],
+                    [("2026-09-01", None)],
+                )
+                report._process_monthly_report(database, cfg, now)
+                report._process_monthly_report(database, cfg, now)
+                sender.assert_called_once()
+            with closing(report._open_database_existing(path)) as database:
+                sent = database.execute(
+                    "SELECT sent_at FROM monthly_reports"
+                ).fetchone()
+                self.assertEqual(sent["sent_at"], now.isoformat())
+
+    def test_monthly_sender_uses_previous_month_and_skips_current(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "report.sqlite3"
+            august = report._empty_period("2026-08-20")
+            august["samples"] = 8928
+            august["totals"]["local"]["packets"] = 10
+            september = report._empty_period("2026-09-20")
+            september["samples"] = 8640
+            september["totals"]["local"]["packets"] = 30
+            with closing(report._open_database(path)) as database, database:
+                report._save_day(database, august)
+                report._save_day(database, september)
+            with (
+                closing(report._open_database_existing(path)) as database,
+                patch.object(report, "_send_monthly_report") as sender,
+                redirect_stdout(StringIO()),
+            ):
+                report._process_monthly_report(
+                    database,
+                    {"timezone": UTC},
+                    datetime(2026, 9, 30, 23, tzinfo=timezone.utc),
+                )
+                sender.assert_called_once()
+                self.assertEqual(sender.call_args.args[1]["start"], "2026-08-01")
+                report._process_monthly_report(
+                    database,
+                    {"timezone": UTC},
+                    datetime(2026, 10, 1, 1, tzinfo=timezone.utc),
+                )
+                self.assertEqual(sender.call_count, 2)
+                current, previous = sender.call_args.args[1:]
+                self.assertEqual(current["start"], "2026-09-01")
+                self.assertEqual(previous["start"], "2026-08-01")
+                self.assertIn(
+                    "Local packets: 30 vs 10; +20 (+200.0%, up)",
+                    report._render_monthly_report(current, previous, UTC),
+                )
+
+    def test_monthly_report_marks_whole_missing_month_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "report.sqlite3"
+            day = report._empty_period("2026-09-30")
+            day["samples"] = 1
+            with closing(report._open_database(path)) as database, database:
+                report._save_day(database, day)
+            with (
+                closing(report._open_database_existing(path)) as database,
+                patch.object(report, "_send_monthly_report") as sender,
+                redirect_stdout(StringIO()),
+            ):
+                report._process_monthly_report(
+                    database,
+                    {"timezone": UTC},
+                    datetime(2026, 11, 1, 1, tzinfo=timezone.utc),
+                )
+                self.assertEqual(sender.call_count, 2)
+                october = sender.call_args_list[1].args[1]
+                self.assertEqual(october["start"], "2026-10-01")
+                self.assertEqual(october["samples"], 0)
+                self.assertIn(
+                    "Packets dropped: unavailable",
+                    report._render_monthly_report(october, None, UTC),
+                )
 
     def test_report_before_first_collection_does_not_create_database(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

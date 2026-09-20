@@ -1,4 +1,4 @@
-"""Collect RouterOS drop counters and mail completed weekly summaries."""
+"""Collect RouterOS drop counters and mail completed weekly or monthly summaries."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from contextlib import closing
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, TypedDict, cast
 from zoneinfo import ZoneInfo
@@ -62,7 +62,7 @@ def _required(name: str) -> str:
     return value
 
 
-def _config(report: bool = False) -> dict[str, Any]:
+def _config(report: bool = False, monthly: bool = False) -> dict[str, Any]:
     cfg: dict[str, Any] = {
         "state": Path(_required("MIKROTIK_REPORT_DB")),
         "timezone": ZoneInfo(os.environ.get("MIKROTIK_REPORT_TIMEZONE", "UTC")),
@@ -72,7 +72,10 @@ def _config(report: bool = False) -> dict[str, Any]:
     if report:
         cfg["recipient"] = _required("MIKROTIK_REPORT_TO")
         cfg["subject"] = os.environ.get(
-            "MIKROTIK_REPORT_SUBJECT", "MikroTik weekly blocking report"
+            "MIKROTIK_MONTHLY_SUBJECT" if monthly else "MIKROTIK_REPORT_SUBJECT",
+            "MikroTik monthly blocking report"
+            if monthly
+            else "MikroTik weekly blocking report",
         )
         cfg["notifier"] = (
             Path(__file__).resolve().parent.parent / "mail-notifier/send-mail.sh"
@@ -240,6 +243,15 @@ def _week_start(now: datetime, tz: ZoneInfo) -> str:
     return (local - timedelta(days=local.weekday())).isoformat()
 
 
+def _month_start(now: datetime, tz: ZoneInfo) -> str:
+    return now.astimezone(tz).date().replace(day=1).isoformat()
+
+
+def _next_month(start: str) -> str:
+    month = date.fromisoformat(start)
+    return (month.replace(day=28) + timedelta(days=4)).replace(day=1).isoformat()
+
+
 def _empty_period(start: str) -> _Period:
     return {
         "start": start,
@@ -300,6 +312,14 @@ def _open_database(path: Path) -> sqlite3.Connection:
             start TEXT PRIMARY KEY,
             data TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS daily_aggregates (
+            day TEXT PRIMARY KEY,
+            data TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS monthly_reports (
+            start TEXT PRIMARY KEY,
+            sent_at TEXT
+        );
     """)
     return database
 
@@ -313,10 +333,72 @@ def _open_database_readonly(path: Path) -> sqlite3.Connection:
 def _open_database_existing(path: Path) -> sqlite3.Connection:
     database = sqlite3.connect(f"{path.as_uri()}?mode=rw", uri=True, timeout=30)
     database.row_factory = sqlite3.Row
-    database.execute(
-        "CREATE TABLE IF NOT EXISTS weekly_history (start TEXT PRIMARY KEY, data TEXT NOT NULL)"
-    )
+    database.executescript("""
+        CREATE TABLE IF NOT EXISTS weekly_history (
+            start TEXT PRIMARY KEY, data TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS daily_aggregates (
+            day TEXT PRIMARY KEY, data TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS monthly_reports (
+            start TEXT PRIMARY KEY, sent_at TEXT
+        );
+    """)
     return database
+
+
+def _load_day(database: sqlite3.Connection, day: str) -> _Period:
+    row = database.execute(
+        "SELECT data FROM daily_aggregates WHERE day = ?", (day,)
+    ).fetchone()
+    return cast("_Period", json.loads(row["data"])) if row else _empty_period(day)
+
+
+def _save_day(database: sqlite3.Connection, day: _Period) -> None:
+    database.execute(
+        "INSERT INTO daily_aggregates (day, data) VALUES (?, ?) "
+        "ON CONFLICT(day) DO UPDATE SET data = excluded.data",
+        (day["start"], json.dumps(day, sort_keys=True)),
+    )
+
+
+def _aggregate_month(database: sqlite3.Connection, start: str) -> _Period | None:
+    rows = database.execute(
+        "SELECT data FROM daily_aggregates WHERE day >= ? AND day < ? ORDER BY day",
+        (start, _next_month(start)),
+    ).fetchall()
+    if not rows:
+        return None
+    month = _empty_period(start)
+    for row in rows:
+        day = cast("_Period", json.loads(row["data"]))
+        for source in SOURCES:
+            for metric in METRICS:
+                month["totals"][source][metric] += day["totals"][source][metric]
+            month["max_sizes"][source] = max(
+                month["max_sizes"][source], day["max_sizes"][source]
+            )
+            month["last_sizes"][source] = day["last_sizes"][source]
+        for field in (
+            "samples",
+            "router_reboots",
+            "counter_resets",
+            "rule_rebaselines",
+        ):
+            month[field] += day[field]
+    return month
+
+
+def _queue_completed_months(database: sqlite3.Connection, current: str) -> None:
+    first = database.execute("SELECT MIN(day) AS day FROM daily_aggregates").fetchone()
+    if first is None or first["day"] is None:
+        return
+    month = date.fromisoformat(first["day"]).replace(day=1).isoformat()
+    while month < current:
+        database.execute(
+            "INSERT OR IGNORE INTO monthly_reports (start) VALUES (?)", (month,)
+        )
+        month = _next_month(month)
 
 
 def _load_history(database: sqlite3.Connection, start: str) -> dict[str, _Period]:
@@ -395,10 +477,15 @@ def _roll_period(state: _State, start: str) -> None:
 
 
 def _apply_snapshot(
-    state: _State, snapshot: _Snapshot, now: datetime, tz: ZoneInfo
+    state: _State,
+    snapshot: _Snapshot,
+    now: datetime,
+    tz: ZoneInfo,
+    daily: _Period | None = None,
 ) -> None:
     _roll_period(state, _week_start(now, tz))
     period = state["period"]
+    aggregates = (period, daily) if daily is not None else (period,)
     previous_at = state["last_sample_at"]
     reboot = False
     if previous_at is not None:
@@ -412,27 +499,34 @@ def _apply_snapshot(
             snapshot["uptime"] < previous_uptime or snapshot["uptime"] + 120 < elapsed
         )
     if reboot:
-        period["router_reboots"] += 1
+        for aggregate in aggregates:
+            aggregate["router_reboots"] += 1
     for key, current in snapshot["counters"].items():
         previous = state["counters"].get(key)
         if previous_at is None or previous is None:
             if previous_at is not None:
-                period["rule_rebaselines"] += 1
+                for aggregate in aggregates:
+                    aggregate["rule_rebaselines"] += 1
             continue  # A new rule starts with a conservative baseline.
         source = key.split(":", 1)[0]
         reset = reboot or any(current[metric] < previous[metric] for metric in METRICS)
         if reset and not reboot:
-            period["counter_resets"] += 1
+            for aggregate in aggregates:
+                aggregate["counter_resets"] += 1
         for metric in METRICS:
-            period["totals"][source][metric] += (
+            difference = (
                 current[metric] if reset else current[metric] - previous[metric]
             )
+            for aggregate in aggregates:
+                aggregate["totals"][source][metric] += difference
     state["counters"] = snapshot["counters"]
     for source in SOURCES:
         size = snapshot["sizes"][source]
-        period["last_sizes"][source] = size
-        period["max_sizes"][source] = max(period["max_sizes"][source], size)
-    period["samples"] += 1
+        for aggregate in aggregates:
+            aggregate["last_sizes"][source] = size
+            aggregate["max_sizes"][source] = max(aggregate["max_sizes"][source], size)
+    for aggregate in aggregates:
+        aggregate["samples"] += 1
     state["last_sample_at"] = now.isoformat()
     state["last_uptime"] = snapshot["uptime"]
 
@@ -479,23 +573,35 @@ def _insert_period(database: sqlite3.Connection, status: str, period: _Period) -
     )
 
 
-def _expected_samples(start: str, tz: ZoneInfo) -> int:
-    first_day = datetime.fromisoformat(start).date()
-    first = datetime.combine(first_day, time.min, tzinfo=tz)
-    end = datetime.combine(first_day + timedelta(days=7), time.min, tzinfo=tz)
+def _expected_samples_between(start: str, end: str, tz: ZoneInfo) -> int:
+    first = datetime.combine(date.fromisoformat(start), time.min, tzinfo=tz)
+    last = datetime.combine(date.fromisoformat(end), time.min, tzinfo=tz)
     seconds = (
-        end.astimezone(timezone.utc) - first.astimezone(timezone.utc)
+        last.astimezone(timezone.utc) - first.astimezone(timezone.utc)
     ).total_seconds()
     return round(seconds / COLLECTION_INTERVAL_SECONDS)
 
 
-def _coverage(period: _Period, tz: ZoneInfo) -> tuple[int, float]:
-    expected = _expected_samples(period["start"], tz)
+def _expected_samples(start: str, tz: ZoneInfo) -> int:
+    end = (date.fromisoformat(start) + timedelta(days=7)).isoformat()
+    return _expected_samples_between(start, end, tz)
+
+
+def _coverage(
+    period: _Period, tz: ZoneInfo, *, monthly: bool = False
+) -> tuple[int, float]:
+    expected = _expected_samples_between(
+        period["start"],
+        _next_month(period["start"])
+        if monthly
+        else (date.fromisoformat(period["start"]) + timedelta(days=7)).isoformat(),
+        tz,
+    )
     return expected, 100 * period["samples"] / expected
 
 
-def _comparable(period: _Period, tz: ZoneInfo) -> bool:
-    expected, _ = _coverage(period, tz)
+def _comparable(period: _Period, tz: ZoneInfo, *, monthly: bool = False) -> bool:
+    expected, _ = _coverage(period, tz, monthly=monthly)
     return period["samples"] >= expected * MIN_COMPARABLE_COVERAGE
 
 
@@ -510,18 +616,23 @@ def _comparison_line(label: str, current: int, previous: int) -> str:
 
 
 def _comparison_lines(
-    period: _Period, previous: _Period | None, tz: ZoneInfo
+    period: _Period,
+    previous: _Period | None,
+    tz: ZoneInfo,
+    *,
+    monthly: bool = False,
 ) -> list[str]:
-    lines = ["Week over week (current vs previous)"]
-    if not _comparable(period, tz):
-        return lines + ["  Unavailable: current week has low sample coverage."]
+    kind = "month" if monthly else "week"
+    lines = [f"{kind.title()} over {kind} (current vs previous)"]
+    if not _comparable(period, tz, monthly=monthly):
+        return lines + [f"  Unavailable: current {kind} has low sample coverage."]
     if previous is None:
         return lines + [
-            "  Unavailable: previous calendar week has no retained history."
+            f"  Unavailable: previous calendar {kind} has no retained history."
         ]
-    if not _comparable(previous, tz):
+    if not _comparable(previous, tz, monthly=monthly):
         return lines + [
-            "  Unavailable: previous calendar week has low sample coverage."
+            f"  Unavailable: previous calendar {kind} has low sample coverage."
         ]
     for source, label in (("local", "Local"), ("crowdsec", "CrowdSec")):
         for metric in METRICS:
@@ -575,6 +686,51 @@ def _trend_lines(
     return lines
 
 
+def _activity_lines(
+    period: _Period, tz: ZoneInfo, *, monthly: bool = False
+) -> list[str]:
+    expected, coverage = _coverage(period, tz, monthly=monthly)
+
+    def value(number: int) -> str:
+        return f"{number:,}" if period["samples"] or not monthly else "unavailable"
+
+    return [
+        "Local MikroTik detection (wan-scanners or configured local list)",
+        f"  Packets dropped: {value(period['totals']['local']['packets'])}",
+        f"  Bytes dropped: {value(period['totals']['local']['bytes'])}",
+        f"  Address list size, latest / observed maximum: {value(period['last_sizes']['local'])} / {value(period['max_sizes']['local'])}",
+        "",
+        "CrowdSec decisions enforced by RouterOS bouncer",
+        f"  Packets dropped: {value(period['totals']['crowdsec']['packets'])}",
+        f"  Bytes dropped: {value(period['totals']['crowdsec']['bytes'])}",
+        f"  Address list size, latest / observed maximum: {value(period['last_sizes']['crowdsec'])} / {value(period['max_sizes']['crowdsec'])}",
+        "",
+        "Data quality",
+        f"  Samples: {period['samples']:,} / ~{expected:,} expected",
+        f"  Coverage: ~{coverage:.1f}%",
+        f"  Router reboots: {value(period['router_reboots'])}",
+        f"  Counter resets: {value(period['counter_resets'])}",
+        f"  Rule rebaselines: {value(period['rule_rebaselines'])}",
+        "",
+    ]
+
+
+def _report_footer(period: _Period) -> list[str]:
+    lines = [
+        "Counters measure packets and bytes discarded by the selected rules, not unique IPs or attacks.",
+        "CrowdSec remains responsible for detecting and classifying attacks.",
+        f"Expected samples and coverage are approximate; comparisons require at least {MIN_COMPARABLE_COVERAGE:.0%} sample coverage in both periods.",
+    ]
+    if period["samples"] == 0:
+        lines.extend(
+            (
+                "",
+                "No collector samples were recorded; zero totals do not mean zero blocked traffic.",
+            )
+        )
+    return lines
+
+
 def _render_report(
     period: _Period,
     tz: ZoneInfo,
@@ -582,29 +738,12 @@ def _render_report(
     *,
     completed: bool = True,
 ) -> str:
-    start = datetime.fromisoformat(period["start"]).date()
+    start = date.fromisoformat(period["start"])
     end = start + timedelta(days=7)
-    expected, coverage = _coverage(period, tz)
     lines = [
         f"MikroTik blocking report: {start} to {end} ({tz.key}, end exclusive)",
         "",
-        "Local MikroTik detection (wan-scanners or configured local list)",
-        f"  Packets dropped: {period['totals']['local']['packets']:,}",
-        f"  Bytes dropped: {period['totals']['local']['bytes']:,}",
-        f"  Address list size, latest / observed maximum: {period['last_sizes']['local']} / {period['max_sizes']['local']}",
-        "",
-        "CrowdSec decisions enforced by RouterOS bouncer",
-        f"  Packets dropped: {period['totals']['crowdsec']['packets']:,}",
-        f"  Bytes dropped: {period['totals']['crowdsec']['bytes']:,}",
-        f"  Address list size, latest / observed maximum: {period['last_sizes']['crowdsec']} / {period['max_sizes']['crowdsec']}",
-        "",
-        "Data quality",
-        f"  Samples: {period['samples']:,} / ~{expected:,} expected",
-        f"  Coverage: ~{coverage:.1f}%",
-        f"  Router reboots: {period['router_reboots']}",
-        f"  Counter resets: {period['counter_resets']}",
-        f"  Rule rebaselines: {period['rule_rebaselines']}",
-        "",
+        *_activity_lines(period, tz),
     ]
     if completed:
         previous_start = (start - timedelta(days=7)).isoformat()
@@ -613,20 +752,22 @@ def _render_report(
         lines.append("")
         lines.extend(_trend_lines(period, retained, tz))
         lines.append("")
-    lines.extend(
-        (
-            "Counters measure packets and bytes discarded by the selected rules, not unique IPs or attacks.",
-            "CrowdSec remains responsible for detecting and classifying attacks.",
-            "Expected samples and coverage are approximate; comparisons require at least 90% sample coverage in both weeks.",
-        )
-    )
-    if period["samples"] == 0:
-        lines.extend(
-            (
-                "",
-                "No collector samples were recorded; zero totals do not mean zero blocked traffic.",
-            )
-        )
+    lines.extend(_report_footer(period))
+    return "\n".join(lines) + "\n"
+
+
+def _render_monthly_report(
+    period: _Period, previous: _Period | None, tz: ZoneInfo
+) -> str:
+    end = _next_month(period["start"])
+    lines = [
+        f"MikroTik monthly blocking report: {period['start']} to {end} ({tz.key}, end exclusive)",
+        "",
+        *_activity_lines(period, tz, monthly=True),
+        *_comparison_lines(period, previous, tz, monthly=True),
+        "",
+        *_report_footer(period),
+    ]
     return "\n".join(lines) + "\n"
 
 
@@ -647,6 +788,18 @@ def _send_report(
             f"Live RouterOS sample: {preview_at.isoformat()}\n"
             "SQLite state and scheduled reports were not changed.\n\n" + body
         )
+    _deliver_report(cfg, subject, body)
+
+
+def _send_monthly_report(
+    cfg: dict[str, Any], period: _Period, previous: _Period | None
+) -> None:
+    subject = f"{cfg['subject']} ({period['start'][:7]})"
+    body = _render_monthly_report(period, previous, cfg["timezone"])
+    _deliver_report(cfg, subject, body)
+
+
+def _deliver_report(cfg: dict[str, Any], subject: str, body: str) -> None:
     command = [
         str(cfg["notifier"]),
         "--to",
@@ -686,13 +839,47 @@ def _process_report(
         print(f"Sent report for week {period['start']}")
 
 
+def _process_monthly_report(
+    database: sqlite3.Connection, cfg: dict[str, Any], now: datetime
+) -> None:
+    current_month = _month_start(now, cfg["timezone"])
+    database.execute("BEGIN IMMEDIATE")
+    _queue_completed_months(database, current_month)
+    database.commit()
+    while True:
+        database.execute("BEGIN IMMEDIATE")
+        row = database.execute(
+            "SELECT start FROM monthly_reports "
+            "WHERE sent_at IS NULL AND start < ? ORDER BY start LIMIT 1",
+            (current_month,),
+        ).fetchone()
+        if row is None:
+            database.commit()
+            break
+        start = row["start"]
+        period = _aggregate_month(database, start) or _empty_period(start)
+        previous_start = (
+            (date.fromisoformat(start) - timedelta(days=1)).replace(day=1).isoformat()
+        )
+        previous = _aggregate_month(database, previous_start)
+        _send_monthly_report(cfg, period, previous)
+        database.execute(
+            "UPDATE monthly_reports SET sent_at = ? WHERE start = ?",
+            (now.isoformat(), start),
+        )
+        database.commit()
+        print(f"Sent report for month {start[:7]}")
+
+
 def _collect(cfg: dict[str, Any], now: datetime) -> None:
     snapshot = _fetch_snapshot(cfg)
     with closing(_open_database(cfg["state"])) as database:
         database.execute("BEGIN IMMEDIATE")
         state = _load_state(database, _week_start(now, cfg["timezone"]))
-        _apply_snapshot(state, snapshot, now, cfg["timezone"])
+        day = _load_day(database, now.astimezone(cfg["timezone"]).date().isoformat())
+        _apply_snapshot(state, snapshot, now, cfg["timezone"], day)
         _save_state(database, state)
+        _save_day(database, day)
         database.commit()
         print(
             f"Collected {len(snapshot['counters'])} rules for week {state['period']['start']}"
@@ -704,6 +891,13 @@ def _report(cfg: dict[str, Any], now: datetime) -> None:
         return
     with closing(_open_database_existing(cfg["state"])) as database:
         _process_report(database, cfg, now)
+
+
+def _monthly_report(cfg: dict[str, Any], now: datetime) -> None:
+    if not cfg["state"].is_file():
+        return
+    with closing(_open_database_existing(cfg["state"])) as database:
+        _process_monthly_report(database, cfg, now)
 
 
 def _test_report(cfg: dict[str, Any], now: datetime) -> None:
@@ -721,13 +915,17 @@ def _test_report(cfg: dict[str, Any], now: datetime) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("collect", "report", "test-report"))
+    parser.add_argument(
+        "command", choices=("collect", "report", "report-monthly", "test-report")
+    )
     args = parser.parse_args()
     now = datetime.now(timezone.utc)
     if args.command == "collect":
         _collect(_config(), now)
     elif args.command == "report":
         _report(_config(report=True), now)
+    elif args.command == "report-monthly":
+        _monthly_report(_config(report=True, monthly=True), now)
     else:
         cfg = {**_config(), **_config(report=True)}
         _test_report(cfg, now)

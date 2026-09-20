@@ -1,0 +1,13 @@
+[Unit]
+Description=Send completed monthly MikroTik blocking reports
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=YOUR_USER
+Group=YOUR_USER
+SupplementaryGroups=mail-notifier
+WorkingDirectory=/path/to/self-hosted/mikrotik-report
+EnvironmentFile=/path/to/self-hosted/mikrotik-report/.env
+ExecStart=/usr/bin/python3 /path/to/self-hosted/mikrotik-report/mikrotik_report.py report-monthly
