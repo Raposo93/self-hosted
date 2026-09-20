@@ -48,7 +48,7 @@ ssh_dir="$HOME/.ssh"
 ssh_config="$ssh_dir/config"
 key_file="$ssh_dir/id_ed25519_${host_alias}"
 public_key_file="${key_file}.pub"
-config_key_file="~/.ssh/id_ed25519_${host_alias}"
+config_key_file="$HOME/.ssh/id_ed25519_${host_alias}"
 begin_marker="# BEGIN self-hosted ssh-client-setup: ${host_alias}"
 end_marker="# END self-hosted ssh-client-setup: ${host_alias}"
 
