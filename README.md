@@ -37,6 +37,7 @@ This repository contains Docker Compose setups, system configuration examples an
 | `mail-notifier/` | Shared email notification helper |
 | `mikrotik-report/` | MikroTik blocking counter collector and weekly/monthly email reports |
 | `pbc/` | Proxmox Backup Client scripts |
+| `ssh-client-setup/` | SSH client key provisioning and host configuration |
 | `shutdown-delayed/` | Delayed graphical shutdown helper |
 | `spaceship-ddns/` | Spaceship dynamic DNS updater |
 
