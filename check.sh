@@ -26,7 +26,11 @@ fi
 
 PYTHON_CACHE_DIRECTORY=""
 UNIT_DIRECTORY=""
+COMPOSE_DIRECTORY=""
 cleanup() {
+    if [[ -n "$COMPOSE_DIRECTORY" ]]; then
+        rm -rf -- "$COMPOSE_DIRECTORY"
+    fi
     if [[ -n "$PYTHON_CACHE_DIRECTORY" ]]; then
         rm -rf -- "$PYTHON_CACHE_DIRECTORY"
     fi
@@ -52,18 +56,29 @@ mapfile -d '' -t COMPOSE_FILES < <(
 if ((${#COMPOSE_FILES[@]} > 0)); then
     echo "Checking Docker Compose definitions..."
     for compose_file in "${COMPOSE_FILES[@]}"; do
-        example_file="${compose_file%/*}/.env.example"
+        component_directory="${compose_file%/*}"
+        example_file="$component_directory/.env.example"
         if [[ ! -f "$example_file" ]]; then
             echo "Error: $compose_file has no .env.example for safe validation." >&2
             exit 1
         fi
         echo "  $compose_file"
+        COMPOSE_DIRECTORY="$(mktemp -d /tmp/self-hosted-compose.XXXXXX)"
+        compose_name="${compose_file##*/}"
+        cp -- "$compose_file" "$COMPOSE_DIRECTORY/$compose_name"
+        for environment_example in "$example_file" "$component_directory"/.*.env.example; do
+            [[ -f "$environment_example" ]] || continue
+            environment_name="${environment_example##*/}"
+            cp -- "$environment_example" "$COMPOSE_DIRECTORY/${environment_name%.example}"
+        done
         if ! env -i PATH="$PATH" docker compose \
-            --env-file "$example_file" -f "$compose_file" \
-            config --no-env-resolution --quiet; then
+            --env-file "$COMPOSE_DIRECTORY/.env" \
+            -f "$COMPOSE_DIRECTORY/$compose_name" config --quiet; then
             echo "Error: Docker Compose validation failed for $compose_file." >&2
             exit 1
         fi
+        rm -rf -- "$COMPOSE_DIRECTORY"
+        COMPOSE_DIRECTORY=""
     done
 fi
 
