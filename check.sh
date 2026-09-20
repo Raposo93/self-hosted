@@ -11,6 +11,11 @@ for command in git bash; do
     fi
 done
 
+if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
+    echo "Error: Docker Compose is required to validate service definitions." >&2
+    exit 1
+fi
+
 PROJECT_PYTHON="python3"
 if [[ -x "$PROJECT_ROOT/.venv/bin/python" ]]; then
     PROJECT_PYTHON="$PROJECT_ROOT/.venv/bin/python"
@@ -39,13 +44,39 @@ if git --no-pager grep -nE '^(<<<<<<< .+|=======|>>>>>>> .+)$'; then
     exit 1
 fi
 
+mapfile -d '' -t COMPOSE_FILES < <(
+    git ls-files -z --cached --others --exclude-standard \
+        '*/docker-compose.yml' '*/docker-compose.yaml' \
+        '*/compose.yml' '*/compose.yaml'
+)
+if ((${#COMPOSE_FILES[@]} > 0)); then
+    echo "Checking Docker Compose definitions..."
+    for compose_file in "${COMPOSE_FILES[@]}"; do
+        example_file="${compose_file%/*}/.env.example"
+        if [[ ! -f "$example_file" ]]; then
+            echo "Error: $compose_file has no .env.example for safe validation." >&2
+            exit 1
+        fi
+        echo "  $compose_file"
+        if ! env -i PATH="$PATH" docker compose \
+            --env-file "$example_file" -f "$compose_file" \
+            config --no-env-resolution --quiet; then
+            echo "Error: Docker Compose validation failed for $compose_file." >&2
+            exit 1
+        fi
+    done
+fi
+
 mapfile -d '' -t SHELL_SCRIPTS < <(
     git ls-files -z --cached --others --exclude-standard '*.sh'
 )
 if ((${#SHELL_SCRIPTS[@]} > 0)); then
     echo "Checking Bash syntax..."
     for script in "${SHELL_SCRIPTS[@]}"; do
-        bash -n "$script"
+        if ! bash -n "$script"; then
+            echo "Error: Bash syntax check failed for $script." >&2
+            exit 1
+        fi
     done
     if command -v shellcheck >/dev/null 2>&1; then
         echo "Running shellcheck..."

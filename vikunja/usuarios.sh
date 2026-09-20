@@ -9,14 +9,14 @@ listar_usuarios() {
 # Función para crear usuario
 crear_usuario() {
     # Solicitar al usuario el nombre de usuario
-    read -p "Introduce el nombre de usuario: " username
+    read -r -p "Introduce el nombre de usuario: " username
 
     # Solicitar al usuario la contraseña (sin mostrarla en pantalla)
-    read -sp "Introduce la contraseña: " password
+    read -r -s -p "Introduce la contraseña: " password
     echo
 
     # Solicitar al usuario el correo electrónico
-    read -p "Introduce el correo electrónico: " email
+    read -r -p "Introduce el correo electrónico: " email
 
     # Ejecutar el comando docker con los valores proporcionados por el usuario
     docker exec vikunja_api /app/vikunja/vikunja user create -e "$email" -p "$password" -u "$username"
@@ -28,7 +28,7 @@ borrar_usuario() {
     listar_usuarios
 
     # Solicitar al usuario el ID del usuario a eliminar
-    read -p "Introduce el ID del usuario que deseas eliminar: " userID
+    read -r -p "Introduce el ID del usuario que deseas eliminar: " userID
 
     # Ejecutar el comando de docker para eliminar el usuario con el ID proporcionado
     docker exec vikunja_api /app/vikunja/vikunja user delete "$userID" -c -n
@@ -43,7 +43,7 @@ main() {
         echo "3. Borrar usuario"
         echo "4. Salir"
 
-        read -p "Introduce el número de la acción que deseas realizar: " opcion
+        read -r -p "Introduce el número de la acción que deseas realizar: " opcion
 
         case $opcion in
             1)

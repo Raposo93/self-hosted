@@ -69,11 +69,21 @@ This repository is intended to store deployment definitions and reusable scripts
 
 ## Usage
 
-Run local repository checks with `./check.sh`. It checks Git diffs, Bash and
-Python syntax, Python tests, Ruff lint and formatting, Pyright, and systemd
-units. Install `ruff` and `pyright` in `.venv` or the active Python environment.
-It also runs `shellcheck` when installed. It does not contact production hosts
-or require private `.env` files.
+Run local repository checks with `./check.sh`. It validates every Docker Compose
+definition with its committed `.env.example`, checks Git diffs, Bash and Python
+syntax, runs Python tests, Ruff lint and formatting, Pyright, and verifies
+systemd examples. Docker Compose, Bash, Git, Python, Ruff, and Pyright are
+required. Install the Python check dependencies with
+`python3 -m pip install -r requirements-check.txt` (or install them in `.venv`).
+It also runs `shellcheck` when installed. GitHub Actions runs the same command
+on pushes and pull requests, with `shellcheck` installed.
+
+The Compose check uses `--no-env-resolution`, so it does not read private
+service `.env` files. It validates the repository examples and Compose model,
+not host-specific settings. HAProxy's complete configuration depends on live
+certificate and map paths, so validate the installed configuration separately
+before reloading it, as described in `haproxy/README.md`. The repository check
+does not contact production hosts.
 
 Enter the directory of the service or tool you want to manage and review its files before running anything.
 
