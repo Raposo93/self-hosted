@@ -16,9 +16,7 @@ class RenderingTests(unittest.TestCase):
         previous["totals"]["crowdsec"]["packets"] = 10
         current["last_sizes"]["local"] = 4
         previous["last_sizes"]["local"] = 2
-        rendered = render_weekly_report(
-            current, UTC, {previous["start"]: previous}
-        )
+        rendered = render_weekly_report(current, UTC, {previous["start"]: previous})
         self.assertIn("Local packets: 50 vs 0; +50 (n/a (zero baseline), up)", rendered)
         self.assertIn("CrowdSec packets: 20 vs 10; +10 (+100.0%, up)", rendered)
         self.assertIn("Local latest list size: 4 vs 2; +2 (+100.0%, up)", rendered)

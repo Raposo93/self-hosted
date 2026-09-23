@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Optional
 from zoneinfo import ZoneInfo
 
-from .models import METRICS, SOURCES, Period, PeriodWindow, Snapshot, State, empty_period
+from .models import (
+    METRICS,
+    SOURCES,
+    Period,
+    PeriodWindow,
+    Snapshot,
+    State,
+    empty_period,
+)
 
 COLLECTION_INTERVAL_SECONDS = 5 * 60
 MIN_COMPARABLE_COVERAGE = 0.90
@@ -55,7 +62,7 @@ def apply_snapshot(
     snapshot: Snapshot,
     now: datetime,
     timezone_: ZoneInfo,
-    daily: Optional[Period] = None,
+    daily: Period | None = None,
 ) -> None:
     roll_period(state, week_start(now, timezone_))
     period = state["period"]
@@ -70,8 +77,7 @@ def apply_snapshot(
         if previous_uptime is None:
             raise ValueError("State is missing the previous router uptime")
         reboot = (
-            snapshot["uptime"] < previous_uptime
-            or snapshot["uptime"] + 120 < elapsed
+            snapshot["uptime"] < previous_uptime or snapshot["uptime"] + 120 < elapsed
         )
     if reboot:
         for aggregate in aggregates:
@@ -99,9 +105,7 @@ def apply_snapshot(
         size = snapshot["sizes"][source]
         for aggregate in aggregates:
             aggregate["last_sizes"][source] = size
-            aggregate["max_sizes"][source] = max(
-                aggregate["max_sizes"][source], size
-            )
+            aggregate["max_sizes"][source] = max(aggregate["max_sizes"][source], size)
     for aggregate in aggregates:
         aggregate["samples"] += 1
     state["last_sample_at"] = now.isoformat()
@@ -109,7 +113,9 @@ def apply_snapshot(
 
 
 def expected_samples(window: PeriodWindow, timezone_: ZoneInfo) -> int:
-    first = datetime.combine(date.fromisoformat(window.start), time.min, tzinfo=timezone_)
+    first = datetime.combine(
+        date.fromisoformat(window.start), time.min, tzinfo=timezone_
+    )
     last = datetime.combine(date.fromisoformat(window.end), time.min, tzinfo=timezone_)
     seconds = (
         last.astimezone(timezone.utc) - first.astimezone(timezone.utc)

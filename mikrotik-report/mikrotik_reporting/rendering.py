@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
-from typing import Optional
 from zoneinfo import ZoneInfo
 
 from .aggregation import (
@@ -36,7 +35,7 @@ def _window_for(period: Period, kind: PeriodKind) -> PeriodWindow:
 
 def _comparison_lines(
     period: Period,
-    previous: Optional[Period],
+    previous: Period | None,
     timezone_: ZoneInfo,
     window: PeriodWindow,
 ) -> list[str]:
@@ -121,16 +120,20 @@ def _activity_lines(
         "Local MikroTik detection (wan-scanners or configured local list)",
         f"  Packets dropped: {value(period['totals']['local']['packets'])}",
         f"  Bytes dropped: {value(period['totals']['local']['bytes'])}",
-        "  Address list size, latest / observed maximum: "
-        f"{value(period['last_sizes']['local'])} / "
-        f"{value(period['max_sizes']['local'])}",
+        (
+            "  Address list size, latest / observed maximum: "
+            f"{value(period['last_sizes']['local'])} / "
+            f"{value(period['max_sizes']['local'])}"
+        ),
         "",
         "CrowdSec decisions enforced by RouterOS bouncer",
         f"  Packets dropped: {value(period['totals']['crowdsec']['packets'])}",
         f"  Bytes dropped: {value(period['totals']['crowdsec']['bytes'])}",
-        "  Address list size, latest / observed maximum: "
-        f"{value(period['last_sizes']['crowdsec'])} / "
-        f"{value(period['max_sizes']['crowdsec'])}",
+        (
+            "  Address list size, latest / observed maximum: "
+            f"{value(period['last_sizes']['crowdsec'])} / "
+            f"{value(period['max_sizes']['crowdsec'])}"
+        ),
         "",
         "Data quality",
         f"  Samples: {period['samples']:,} / ~{expected:,} expected",
@@ -144,18 +147,24 @@ def _activity_lines(
 
 def _report_footer(period: Period) -> list[str]:
     lines = [
-        "Counters measure packets and bytes discarded by the selected rules, "
-        "not unique IPs or attacks.",
+        (
+            "Counters measure packets and bytes discarded by the selected rules, "
+            "not unique IPs or attacks."
+        ),
         "CrowdSec remains responsible for detecting and classifying attacks.",
-        "Expected samples and coverage are approximate; comparisons require at "
-        f"least {MIN_COMPARABLE_COVERAGE:.0%} sample coverage in both periods.",
+        (
+            "Expected samples and coverage are approximate; comparisons require at "
+            f"least {MIN_COMPARABLE_COVERAGE:.0%} sample coverage in both periods."
+        ),
     ]
     if period["samples"] == 0:
         lines.extend(
             (
                 "",
-                "No collector samples were recorded; zero totals do not mean "
-                "zero blocked traffic.",
+                (
+                    "No collector samples were recorded; zero totals do not mean "
+                    "zero blocked traffic."
+                ),
             )
         )
     return lines
@@ -164,14 +173,16 @@ def _report_footer(period: Period) -> list[str]:
 def render_weekly_report(
     period: Period,
     timezone_: ZoneInfo,
-    history: Optional[dict[str, Period]] = None,
+    history: dict[str, Period] | None = None,
     *,
     completed: bool = True,
 ) -> str:
     window = week_window(period["start"])
     lines = [
-        f"MikroTik blocking report: {window.start} to {window.end} "
-        f"({timezone_.key}, end exclusive)",
+        (
+            f"MikroTik blocking report: {window.start} to {window.end} "
+            f"({timezone_.key}, end exclusive)"
+        ),
         "",
         *_activity_lines(period, timezone_, window),
     ]
@@ -191,12 +202,14 @@ def render_weekly_report(
 
 
 def render_monthly_report(
-    period: Period, previous: Optional[Period], timezone_: ZoneInfo
+    period: Period, previous: Period | None, timezone_: ZoneInfo
 ) -> str:
     window = month_window(period["start"])
     lines = [
-        f"MikroTik monthly blocking report: {window.start} to {window.end} "
-        f"({timezone_.key}, end exclusive)",
+        (
+            f"MikroTik monthly blocking report: {window.start} to {window.end} "
+            f"({timezone_.key}, end exclusive)"
+        ),
         "",
         *_activity_lines(period, timezone_, window),
         *_comparison_lines(period, previous, timezone_, window),

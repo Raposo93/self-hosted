@@ -14,7 +14,7 @@ never enables per-packet logging.
 
 ## Requirements and configuration
 
-* Python 3.9 or newer, with timezone data for `MIKROTIK_REPORT_TIMEZONE`.
+* Python 3.10 or newer, with timezone data for `MIKROTIK_REPORT_TIMEZONE`.
 * RouterOS 7 with `www-ssl` enabled, a certificate trusted by the collecting
   host, and a dedicated account permitted to read firewall rules, address lists,
   and system resource data. On the tested RouterOS 7.24.4 installation, a custom

@@ -7,7 +7,7 @@ import os
 import sqlite3
 from datetime import date
 from pathlib import Path
-from typing import Optional, cast
+from typing import cast
 
 from .aggregation import next_month
 from .models import METRICS, SOURCES, Period, State, empty_period, initial_state
@@ -145,7 +145,7 @@ def save_day(database: sqlite3.Connection, day: Period) -> None:
     )
 
 
-def aggregate_month(database: sqlite3.Connection, start: str) -> Optional[Period]:
+def aggregate_month(database: sqlite3.Connection, start: str) -> Period | None:
     rows = database.execute(
         "SELECT data FROM daily_aggregates WHERE day >= ? AND day < ? ORDER BY day",
         (start, next_month(start)),
@@ -184,7 +184,7 @@ def queue_completed_months(database: sqlite3.Connection, current: str) -> None:
         month = next_month(month)
 
 
-def next_pending_month(database: sqlite3.Connection, current: str) -> Optional[str]:
+def next_pending_month(database: sqlite3.Connection, current: str) -> str | None:
     row = database.execute(
         "SELECT start FROM monthly_reports "
         "WHERE sent_at IS NULL AND start < ? ORDER BY start LIMIT 1",
@@ -193,9 +193,7 @@ def next_pending_month(database: sqlite3.Connection, current: str) -> Optional[s
     return cast("str", row["start"]) if row is not None else None
 
 
-def mark_month_sent(
-    database: sqlite3.Connection, start: str, sent_at: str
-) -> None:
+def mark_month_sent(database: sqlite3.Connection, start: str, sent_at: str) -> None:
     database.execute(
         "UPDATE monthly_reports SET sent_at = ? WHERE start = ?", (sent_at, start)
     )
@@ -284,9 +282,7 @@ def save_state(database: sqlite3.Connection, state: State) -> None:
     _insert_period(database, "active", state["period"])
 
 
-def _insert_period(
-    database: sqlite3.Connection, status: str, period: Period
-) -> None:
+def _insert_period(database: sqlite3.Connection, status: str, period: Period) -> None:
     database.execute(
         "INSERT INTO periods VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (

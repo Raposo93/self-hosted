@@ -7,9 +7,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from zoneinfo import ZoneInfo
+
 from mikrotik_reporting.config import CommonConfig, MailConfig, RouterOSConfig
 from mikrotik_reporting.models import Snapshot
-from zoneinfo import ZoneInfo
 
 UTC = ZoneInfo("UTC")
 

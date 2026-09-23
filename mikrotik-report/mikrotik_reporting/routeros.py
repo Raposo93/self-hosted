@@ -7,7 +7,7 @@ import json
 import re
 import urllib.parse
 import urllib.request
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from .config import RouterOSConfig
 from .models import METRICS, Snapshot
@@ -17,13 +17,11 @@ UPTIME_PART = re.compile(r"(\d+)([ywdhms])")
 
 
 def _get_json(
-    config: RouterOSConfig, path: str, params: Optional[dict[str, str]] = None
+    config: RouterOSConfig, path: str, params: dict[str, str] | None = None
 ) -> object:
     query = urllib.parse.urlencode(params or {})
     url = f"{config.url}/{path}" + (f"?{query}" if query else "")
-    credentials = base64.b64encode(
-        f"{config.user}:{config.password}".encode()
-    ).decode()
+    credentials = base64.b64encode(f"{config.user}:{config.password}".encode()).decode()
     request = urllib.request.Request(
         url, headers={"Authorization": f"Basic {credentials}"}
     )

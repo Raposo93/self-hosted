@@ -6,7 +6,6 @@ import sqlite3
 import subprocess
 from contextlib import closing
 from datetime import date, datetime, timedelta
-from typing import Optional
 
 from .aggregation import apply_snapshot, month_start, roll_period, week_start
 from .config import CommonConfig, MailConfig, RouterOSConfig
@@ -49,8 +48,8 @@ def _send_weekly_report(
     mail: MailConfig,
     common: CommonConfig,
     period: Period,
-    preview_at: Optional[datetime] = None,
-    history: Optional[dict[str, Period]] = None,
+    preview_at: datetime | None = None,
+    history: dict[str, Period] | None = None,
 ) -> None:
     subject = f"{mail.subject} ({period['start']})"
     body = render_weekly_report(
@@ -70,7 +69,7 @@ def _send_monthly_report(
     mail: MailConfig,
     common: CommonConfig,
     period: Period,
-    previous: Optional[Period],
+    previous: Period | None,
 ) -> None:
     subject = f"{mail.subject} ({period['start'][:7]})"
     body = render_monthly_report(period, previous, common.timezone)
@@ -133,9 +132,7 @@ def process_monthly_reports(
         print(f"Sent report for month {start[:7]}")
 
 
-def collect(
-    common: CommonConfig, routeros: RouterOSConfig, now: datetime
-) -> None:
+def collect(common: CommonConfig, routeros: RouterOSConfig, now: datetime) -> None:
     snapshot = fetch_snapshot(routeros)
     with closing(open_database(common.state)) as database:
         database.execute("BEGIN IMMEDIATE")
@@ -151,18 +148,14 @@ def collect(
         )
 
 
-def send_weekly_reports(
-    common: CommonConfig, mail: MailConfig, now: datetime
-) -> None:
+def send_weekly_reports(common: CommonConfig, mail: MailConfig, now: datetime) -> None:
     if not common.state.is_file():
         return
     with closing(open_database_existing(common.state)) as database:
         process_weekly_reports(database, common, mail, now)
 
 
-def send_monthly_reports(
-    common: CommonConfig, mail: MailConfig, now: datetime
-) -> None:
+def send_monthly_reports(common: CommonConfig, mail: MailConfig, now: datetime) -> None:
     if not common.state.is_file():
         return
     with closing(open_database_existing(common.state)) as database:

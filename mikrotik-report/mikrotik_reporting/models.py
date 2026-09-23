@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Optional, TypedDict
+from typing import Literal, TypedDict
 
 SOURCES = ("local", "crowdsec")
 METRICS = ("packets", "bytes")
@@ -37,8 +37,8 @@ class State(TypedDict):
     period: Period
     pending: list[Period]
     counters: dict[str, dict[str, int]]
-    last_sample_at: Optional[str]
-    last_uptime: Optional[int]
+    last_sample_at: str | None
+    last_uptime: int | None
 
 
 @dataclass(frozen=True)
