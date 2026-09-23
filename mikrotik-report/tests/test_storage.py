@@ -116,10 +116,10 @@ class StorageTests(unittest.TestCase):
                 cursor_size = database.execute(
                     "SELECT COUNT(*) FROM detection_log_cursor"
                 ).fetchone()[0]
-            source_rows = database.execute(
-                "SELECT day, source_ip, detections "
-                "FROM daily_source_detections ORDER BY day, source_ip"
-            ).fetchall()
+                source_rows = database.execute(
+                    "SELECT day, source_ip, detections "
+                    "FROM daily_source_detections ORDER BY day, source_ip"
+                ).fetchall()
             self.assertEqual(
                 combined,
                 [
