@@ -118,6 +118,15 @@ class WorkflowTests(unittest.TestCase):
                         }
                     ],
                 )
+                self.assertEqual(
+                    first_sender.call_args.kwargs["top_sources"],
+                    [
+                        {
+                            "source_ip": "192.0.2.10",
+                            "detections": 1,
+                        }
+                    ],
+                )
             with closing(open_database_existing(path)) as database, database:
                 state = load_state(database, "2026-09-21")
                 state["period"]["samples"] = 2016
@@ -310,6 +319,15 @@ class WorkflowTests(unittest.TestCase):
                     sender.call_args.kwargs["top_ports"][0]["destination_port"],
                     6881,
                 )
+                self.assertEqual(
+                    sender.call_args.kwargs["top_sources"],
+                    [
+                        {
+                            "source_ip": "192.0.2.20",
+                            "detections": 1,
+                        }
+                    ],
+                )
                 process_monthly_reports(
                     database,
                     shared,
@@ -323,6 +341,15 @@ class WorkflowTests(unittest.TestCase):
                 self.assertEqual(
                     sender.call_args.kwargs["top_ports"][0]["destination_port"],
                     23,
+                )
+                self.assertEqual(
+                    sender.call_args.kwargs["top_sources"],
+                    [
+                        {
+                            "source_ip": "192.0.2.21",
+                            "detections": 1,
+                        }
+                    ],
                 )
                 self.assertIn(
                     "Local packets: 30 vs 10; +20 (+200.0%, up)",

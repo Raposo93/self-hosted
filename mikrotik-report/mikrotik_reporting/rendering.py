@@ -12,7 +12,14 @@ from .aggregation import (
     month_window,
     week_window,
 )
-from .models import METRICS, Period, PeriodKind, PeriodWindow, PortDetection
+from .models import (
+    METRICS,
+    Period,
+    PeriodKind,
+    PeriodWindow,
+    PortDetection,
+    SourceDetection,
+)
 
 
 def _comparison_line(label: str, current: int, previous: int) -> str:
@@ -158,6 +165,19 @@ def _detected_port_lines(ports: list[PortDetection]) -> list[str]:
     return lines
 
 
+def _detected_source_lines(sources: list[SourceDetection]) -> list[str]:
+    lines = ["Top recurring source IPs"]
+    if not sources:
+        return lines + ["  No detection events recorded.", ""]
+    for item in sources:
+        label = item["source_ip"]
+        detections = item["detections"]
+        noun = "detection" if detections == 1 else "detections"
+        lines.append(f"  {label:<12} {detections:>8,} {noun}")
+    lines.append("")
+    return lines
+
+
 def _report_footer(period: Period, *, comparisons: bool = True) -> list[str]:
     lines = [
         (
@@ -194,6 +214,7 @@ def render_weekly_report(
     *,
     completed: bool = True,
     top_ports: list[PortDetection] | None = None,
+    top_sources: list[SourceDetection] | None = None,
 ) -> str:
     window = week_window(period["start"])
     lines = [
@@ -204,6 +225,7 @@ def render_weekly_report(
         "",
         *_activity_lines(period, timezone_, window),
         *_detected_port_lines(top_ports or []),
+        *_detected_source_lines(top_sources or []),
     ]
     if completed:
         previous_start = (
@@ -225,6 +247,7 @@ def render_monthly_report(
     previous: Period | None,
     timezone_: ZoneInfo,
     top_ports: list[PortDetection] | None = None,
+    top_sources: list[SourceDetection] | None = None,
 ) -> str:
     window = month_window(period["start"])
     lines = [
@@ -235,6 +258,7 @@ def render_monthly_report(
         "",
         *_activity_lines(period, timezone_, window),
         *_detected_port_lines(top_ports or []),
+        *_detected_source_lines(top_sources or []),
         *_comparison_lines(period, previous, timezone_, window),
         "",
         *_report_footer(period),
@@ -247,6 +271,7 @@ def render_range_report(
     window: PeriodWindow,
     timezone_: ZoneInfo,
     top_ports: list[PortDetection] | None = None,
+    top_sources: list[SourceDetection] | None = None,
 ) -> str:
     if window.kind != "range":
         raise ValueError("Range report requires an explicit range window")
@@ -258,6 +283,7 @@ def render_range_report(
         "",
         *_activity_lines(period, timezone_, window),
         *_detected_port_lines(top_ports or []),
+        *_detected_source_lines(top_sources or []),
     ]
     if not comparable(period, window, timezone_):
         lines.extend(

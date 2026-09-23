@@ -95,6 +95,36 @@ class RenderingTests(unittest.TestCase):
         self.assertIn("Packets dropped: unavailable", rendered)
         self.assertIn("zero totals do not mean zero blocked traffic", rendered)
 
+    def test_recurring_source_ips_are_compact_and_labeled(self) -> None:
+        period = empty_period("2026-09-21")
+
+        rendered = render_weekly_report(
+            period,
+            UTC,
+            top_sources=[
+                {"source_ip": "192.0.2.10", "detections": 17},
+                {"source_ip": "192.0.2.20", "detections": 1},
+            ],
+        )
+
+        self.assertIn("Top recurring source IPs", rendered)
+        self.assertIn("192.0.2.10", rendered)
+        self.assertIn("17 detections", rendered)
+        self.assertIn("192.0.2.20", rendered)
+        self.assertIn("1 detection", rendered)
+
+    def test_empty_source_ip_data_is_explicit(self) -> None:
+        period = empty_period("2026-09-21")
+
+        rendered = render_weekly_report(
+            period,
+            UTC,
+            top_sources=[],
+        )
+
+        self.assertIn("Top recurring source IPs", rendered)
+        self.assertIn("No detection events recorded.", rendered)
+
 
 if __name__ == "__main__":
     unittest.main()

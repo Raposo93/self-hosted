@@ -147,6 +147,7 @@ class RangeReportTests(unittest.TestCase):
             ):
                 main()
             self.assertIn("2026-09-16 to 2026-09-17", output.getvalue())
+            self.assertIn("192.0.2.40", output.getvalue())
             self.assertIn("22/tcp", output.getvalue())
 
 

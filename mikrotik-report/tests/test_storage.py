@@ -18,6 +18,7 @@ from mikrotik_reporting.storage import (
     retain_sent_week,
     save_state,
     top_detected_ports,
+    top_source_detections,
 )
 
 
@@ -226,6 +227,38 @@ class StorageTests(unittest.TestCase):
                 open_database_existing(path)
             with self.assertRaisesRegex(ValueError, "newer than supported"):
                 open_database_readonly(path)
+
+    def test_source_detections_are_aggregated_and_ranked(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "report.sqlite3"
+
+            with closing(open_database(path)) as database, database:
+                database.executemany(
+                    "INSERT INTO daily_source_detections "
+                    "(day, source_ip, detections) VALUES (?, ?, ?)",
+                    [
+                        ("2026-09-20", "192.0.2.10", 3),
+                        ("2026-09-21", "192.0.2.10", 4),
+                        ("2026-09-21", "192.0.2.20", 7),
+                        ("2026-09-21", "192.0.2.30", 2),
+                        ("2026-09-22", "192.0.2.40", 100),
+                    ],
+                )
+
+                sources = top_source_detections(
+                    database,
+                    "2026-09-20",
+                    "2026-09-22",
+                )
+
+            self.assertEqual(
+                sources,
+                [
+                    {"source_ip": "192.0.2.10", "detections": 7},
+                    {"source_ip": "192.0.2.20", "detections": 7},
+                    {"source_ip": "192.0.2.30", "detections": 2},
+                ],
+            )
 
 
 if __name__ == "__main__":

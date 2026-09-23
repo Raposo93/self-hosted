@@ -35,6 +35,11 @@ class PortDetection(TypedDict):
     detections: int
 
 
+class SourceDetection(TypedDict):
+    source_ip: str
+    detections: int
+
+
 class Aggregate(TypedDict):
     totals: dict[str, dict[str, int]]
     max_sizes: dict[str, int]

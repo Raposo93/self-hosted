@@ -16,6 +16,7 @@ from .models import (
     DetectionBatch,
     Period,
     PortDetection,
+    SourceDetection,
     State,
     empty_period,
     initial_state,
@@ -302,6 +303,35 @@ def top_detected_ports(
         {
             "protocol": row["protocol"],
             "destination_port": row["destination_port"],
+            "detections": row["detections"],
+        }
+        for row in rows
+    ]
+
+
+def top_source_detections(
+    database: sqlite3.Connection,
+    start: str,
+    end: str,
+    limit: int = 10,
+) -> list[SourceDetection]:
+    if limit <= 0:
+        raise ValueError("Detection source limit must be positive")
+    if not database.execute(
+        "SELECT 1 FROM sqlite_master "
+        "WHERE type = 'table' AND name = 'daily_source_detections'"
+    ).fetchone():
+        return []
+    rows = database.execute(
+        "SELECT source_ip, SUM(detections) AS detections "
+        "FROM daily_source_detections WHERE day >= ? AND day < ? "
+        "GROUP BY source_ip "
+        "ORDER BY detections DESC, source_ip LIMIT ?",
+        (start, end, limit),
+    ).fetchall()
+    return [
+        {
+            "source_ip": row["source_ip"],
             "detections": row["detections"],
         }
         for row in rows
