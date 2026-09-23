@@ -48,9 +48,12 @@ Use an absolute `MIKROTIK_REPORT_DB` path outside the checkout. The SQLite
 database contains last counter values, current/pending weekly totals, the last
 12 successfully emailed weekly aggregates, and daily aggregates for exact month
 boundaries and later historical queries. Monthly delivery status is stored in
-the same database. Daily aggregates are retained without a time limit; they are
-small and contain no raw RouterOS responses or individual samples. Existing
-weeks recorded before this feature cannot be reconstructed into daily history.
+the same database. The schema uses SQLite's `user_version`; a writing command
+upgrades an older unversioned database before changing report state, while a
+database created by a newer unsupported version is rejected. Daily aggregates
+are retained without a time limit; they are small and contain no raw RouterOS
+responses or individual samples. Existing weeks recorded before this feature
+cannot be reconstructed into daily history.
 The service user needs write access to its parent directory. The program sets
 the database file to mode `600`. Keep `.env` private as it contains the RouterOS
 password; neither it nor the database belongs in Git.
@@ -195,11 +198,30 @@ timers are stopped; do not copy it during a write. To reset all reporting
 history, stop all timers, move the database aside, and start them again. The
 next collection will establish a new baseline.
 
+## Code organization
+
+`mikrotik_report.py` is a compatibility entry point kept stable for the systemd
+units. The implementation lives in the `mikrotik_reporting` package:
+
+* `config.py` validates command-specific environment configuration;
+* `routeros.py` reads and validates RouterOS REST responses;
+* `models.py` and `aggregation.py` define report data, calendar windows,
+  counter deltas, and coverage;
+* `storage.py` owns the SQLite schema, migrations, and queries;
+* `rendering.py` produces report text without external side effects;
+* `workflows.py` coordinates transactions, collection, and direct invocation of
+  the shared `mail-notifier/send-mail.sh` transport;
+* `cli.py` maps the four existing commands to those workflows.
+
+Keep business decisions out of the CLI and SQLite helpers. New report formats
+should consume aggregates through `rendering.py`; new collection data should be
+normalized by `routeros.py` before it reaches aggregation or persistence.
+
 ## Local validation
 
 ```bash
 python3 -m unittest discover -s tests -v
-python3 -m compileall -q mikrotik_report.py
+python3 -m compileall -q mikrotik_report.py mikrotik_reporting
 ```
 
 The tests use synthetic RouterOS responses and temporary SQLite files. They
