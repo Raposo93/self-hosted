@@ -10,9 +10,18 @@ from pathlib import Path
 from typing import cast
 
 from .aggregation import next_month
-from .models import METRICS, SOURCES, Period, State, empty_period, initial_state
+from .models import (
+    METRICS,
+    SOURCES,
+    DetectionBatch,
+    Period,
+    PortDetection,
+    State,
+    empty_period,
+    initial_state,
+)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 HISTORY_WEEKS = 12
 
 
@@ -83,7 +92,31 @@ def _migrate_to_1(database: sqlite3.Connection) -> None:
         """)
 
 
-MIGRATIONS = {1: _migrate_to_1}
+def _migrate_to_2(database: sqlite3.Connection) -> None:
+    database.executescript("""
+        BEGIN IMMEDIATE;
+        CREATE TABLE IF NOT EXISTS detection_log_state (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            initialized INTEGER NOT NULL CHECK (initialized IN (0, 1))
+        );
+        INSERT OR IGNORE INTO detection_log_state VALUES (1, 0);
+        CREATE TABLE IF NOT EXISTS detection_log_cursor (
+            fingerprint TEXT PRIMARY KEY
+        );
+        CREATE TABLE IF NOT EXISTS daily_detection_events (
+            day TEXT NOT NULL,
+            protocol TEXT NOT NULL,
+            destination_port INTEGER NOT NULL
+                CHECK (destination_port BETWEEN 0 AND 65535),
+            detections INTEGER NOT NULL CHECK (detections > 0),
+            PRIMARY KEY (day, protocol, destination_port)
+        );
+        PRAGMA user_version = 2;
+        COMMIT;
+    """)
+
+
+MIGRATIONS = {1: _migrate_to_1, 2: _migrate_to_2}
 
 
 def ensure_schema(database: sqlite3.Connection) -> None:
@@ -180,6 +213,78 @@ def aggregate_range(
 
 def aggregate_month(database: sqlite3.Connection, start: str) -> Period | None:
     return aggregate_range(database, start, next_month(start))
+
+
+def record_detection_batch(
+    database: sqlite3.Connection,
+    batch: DetectionBatch,
+    *,
+    reset_cursor: bool = False,
+) -> int:
+    state = database.execute(
+        "SELECT initialized FROM detection_log_state WHERE id = 1"
+    ).fetchone()
+    if state is None:
+        raise ValueError("Database is missing detection log state")
+    previous = {
+        row["fingerprint"]
+        for row in database.execute("SELECT fingerprint FROM detection_log_cursor")
+    }
+    if reset_cursor:
+        previous.clear()
+    new_fingerprints = set(batch["fingerprints"]) - previous
+    recorded = 0
+    if state["initialized"]:
+        for event in batch["events"]:
+            if event["fingerprint"] not in new_fingerprints:
+                continue
+            database.execute(
+                "INSERT INTO daily_detection_events "
+                "(day, protocol, destination_port, detections) "
+                "VALUES (?, ?, ?, 1) "
+                "ON CONFLICT(day, protocol, destination_port) "
+                "DO UPDATE SET detections = detections + 1",
+                (
+                    event["day"],
+                    event["protocol"],
+                    event["destination_port"],
+                ),
+            )
+            recorded += 1
+    database.execute("DELETE FROM detection_log_cursor")
+    database.executemany(
+        "INSERT INTO detection_log_cursor (fingerprint) VALUES (?)",
+        ((fingerprint,) for fingerprint in batch["fingerprints"]),
+    )
+    database.execute("UPDATE detection_log_state SET initialized = 1 WHERE id = 1")
+    return recorded
+
+
+def top_detected_ports(
+    database: sqlite3.Connection, start: str, end: str, limit: int = 10
+) -> list[PortDetection]:
+    if limit <= 0:
+        raise ValueError("Detection port limit must be positive")
+    if not database.execute(
+        "SELECT 1 FROM sqlite_master "
+        "WHERE type = 'table' AND name = 'daily_detection_events'"
+    ).fetchone():
+        return []
+    rows = database.execute(
+        "SELECT protocol, destination_port, SUM(detections) AS detections "
+        "FROM daily_detection_events WHERE day >= ? AND day < ? "
+        "GROUP BY protocol, destination_port "
+        "ORDER BY detections DESC, destination_port, protocol LIMIT ?",
+        (start, end, limit),
+    ).fetchall()
+    return [
+        {
+            "protocol": row["protocol"],
+            "destination_port": row["destination_port"],
+            "detections": row["detections"],
+        }
+        for row in rows
+    ]
 
 
 def queue_completed_months(database: sqlite3.Connection, current: str) -> None:

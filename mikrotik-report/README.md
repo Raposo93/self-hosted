@@ -11,15 +11,19 @@ The two report sections have different meanings. The local rule measures packets
 discarded by the router's own detection list. Bouncer rules measure traffic
 discarded under CrowdSec decisions; CrowdSec detects and classifies those
 attacks. Counts are packets and bytes, not unique IPs or attacks. The collector
-never enables per-packet logging.
+also records one lightweight event when the local detection rule first adds a
+source to the configured list. Destination-port rankings count those detection
+events, not packets or unique attacks. The collector never enables per-packet
+drop logging.
 
 ## Requirements and configuration
 
 * Python 3.10 or newer, with timezone data for `MIKROTIK_REPORT_TIMEZONE`.
-* RouterOS 7 with `www-ssl` enabled, a certificate trusted by the collecting
-  host, and a dedicated account permitted to read firewall rules, address lists,
-  and system resource data. On the tested RouterOS 7.24.4 installation, a custom
-  group with `read,api,rest-api` worked; `read,rest-api` alone returned
+* RouterOS 7.20 or newer with `www-ssl` enabled, a certificate trusted by the
+  collecting host, and a dedicated account permitted to read firewall rules,
+  address lists, system resource data, and the dedicated log buffer. On the
+  tested RouterOS 7.24.4 installation, a custom group with
+  `read,api,rest-api` worked; `read,rest-api` alone returned
   `not allowed (9)`. Restrict the account to the collecting host with its
   `address` setting (`10.1.1.11/32` in that installation; use the actual
   collector address elsewhere).
@@ -40,16 +44,21 @@ rules make collection fail so a bad selector cannot silently report zero.
 
 `MIKROTIK_REST_URL` must be an HTTPS URL ending in `/rest`. TLS verification
 remains enabled. For a private CA, set `MIKROTIK_CA_FILE` to its PEM bundle or
-install it in the system trust store. The collector makes five small read-only
+install it in the system trust store. The collector makes six small read-only
 requests per run: IPv4 `raw` rules, IPv4 `filter` rules, each selected address
-list, and router uptime. Rule and list responses request only needed fields.
-The list requests return one minimal record per entry to determine their size.
+list, router uptime, and the dedicated detection-event memory log. Rule, list,
+and log responses request only needed fields. The list requests return one
+minimal record per entry to determine their size.
 
 Use an absolute `MIKROTIK_REPORT_DB` path outside the checkout. The SQLite
 database contains last counter values, current/pending weekly totals, the last
 12 successfully emailed weekly aggregates, and daily aggregates for exact month
 boundaries and later historical queries. Monthly delivery status is stored in
-the same database. The schema uses SQLite's `user_version`; a writing command
+the same database. Daily destination-port detection counts and a bounded cursor
+of the RouterOS memory entries seen during the previous poll are also stored;
+full firewall messages, source and destination addresses, interfaces, MAC
+addresses, and packet lengths are not retained. The schema uses SQLite's
+`user_version`; a writing command
 upgrades an older unversioned database before changing report state, while a
 database created by a newer unsupported version is rejected. Daily aggregates
 are retained without a time limit; they are small and contain no raw RouterOS
@@ -58,6 +67,60 @@ cannot be reconstructed into daily history.
 The service user needs write access to its parent directory. The program sets
 the database file to mode `600`. Keep `.env` private as it contains the RouterOS
 password; neither it nor the database belongs in Git.
+
+## RouterOS detection-event setup
+
+Destination-port rankings use a dedicated in-memory RouterOS log buffer. Do not
+enable logging on the `wan-scanners` drop rule: it matches every subsequent
+packet and would create the per-packet logging this component is designed to
+avoid. Instead, enable logging only on the rule that initially detects a source
+and performs `add-src-to-address-list`. That rule must stop matching the source
+after adding it, normally through `src-address-list=!wan-scanners` or an
+equivalent condition.
+
+Create a dedicated memory buffer and route only messages with the configured
+prefix into it. These commands use the defaults from `.env.example`:
+
+```routeros
+/system/logging/action/add name=mikrotik-report target=memory memory-lines=1000
+/system/logging/add action=mikrotik-report topics=firewall regex="^mikrotik-report-detect"
+```
+
+Locate and inspect the detection rule before changing it. Adapt `raw` to
+`filter` if that is where the rule lives:
+
+```routeros
+/ip/firewall/raw/print detail where action=add-src-to-address-list and address-list="wan-scanners"
+```
+
+After confirming that the rule represents the first detection rather than the
+drop path, enable its log flag using the exact rule ID printed above:
+
+```routeros
+/ip/firewall/raw/set *RULE_ID log=yes log-prefix="mikrotik-report-detect"
+```
+
+Verify that a test detection produces a single entry with protocol, source and
+destination ports:
+
+```routeros
+/log/print where buffer=mikrotik-report
+```
+
+Set `MIKROTIK_DETECTION_LOG_BUFFER` and `MIKROTIK_DETECTION_LOG_PREFIX` if other
+names are used. Keep the buffer in memory rather than on router flash. The
+router clock must be synchronized and use the same timezone as
+`MIKROTIK_REPORT_TIMEZONE`, because current-day RouterOS log entries contain
+only a local time.
+
+The first successful collector run establishes a conservative cursor over the
+existing buffer and does not claim those older entries. Later polls store only
+new matching TCP/UDP events as daily `protocol/destination-port` counts. The
+cursor contains hashes for at most the entries in the current memory buffer; it
+does not grow with report history. A router reboot or buffer overflow before a
+poll can lose detection events, and those events cannot be reconstructed from
+firewall counters. An empty ranking therefore means no events were persisted,
+not proof that no detections occurred.
 
 ## Installation
 
@@ -155,7 +218,8 @@ environment.
 
 Range totals include samples persisted inside the requested dates, including
 ranges that cross weekly or monthly boundaries. Address-list maxima cover all
-sampled days and the latest size comes from the last sampled day. The quality
+sampled days and the latest size comes from the last sampled day. The detected
+destination-port top uses the same exact date boundaries. The quality
 block compares observed samples with the nominal five-minute cadence over the
 exact interval. Partial coverage is marked explicitly and totals then describe
 only observed samples; a range with no persisted samples reports activity as
@@ -196,13 +260,16 @@ latest list sizes, and coverage, with missing weeks shown explicitly. Both weeks
 must have at least 90% of the nominal sample count for a comparison; lower
 coverage is shown as unavailable rather than as zero. The trend applies the same
 rule. Router reboot, counter reset, and rule rebaseline counts are informational,
-not traffic metrics. Historical comparisons start becoming available after the
-first completed week has been emailed with sufficient coverage. Earlier reports
-are not reconstructed from current router counters.
+not traffic metrics. A separate compact top lists up to ten destination
+`port/protocol` pairs by local detection-event count. These counts are neither
+packet volume nor unique attacks. Historical comparisons start becoming
+available after the first completed week has been emailed with sufficient
+coverage. Earlier reports are not reconstructed from current router counters.
 
 The monthly email shows local and CrowdSec packet and byte totals, latest and
 maximum observed address-list sizes, and the same data-quality fields as the
-weekly email. Month-over-month comparisons use the same current, previous,
+weekly email. It also aggregates the destination-port top over the exact
+calendar month. Month-over-month comparisons use the same current, previous,
 absolute change, percentage, and direction rules. Both months need at least
 90% estimated sample coverage; a missing or low-coverage previous month is
 shown as unavailable. An entirely unsampled month has unavailable activity
@@ -232,10 +299,12 @@ next collection will establish a new baseline.
 units. The implementation lives in the `mikrotik_reporting` package:
 
 * `config.py` validates command-specific environment configuration;
-* `routeros.py` reads and validates RouterOS REST responses;
+* `routeros.py` reads and validates RouterOS REST responses and normalizes
+  lightweight detection log entries;
 * `models.py` and `aggregation.py` define report data, calendar windows,
   counter deltas, and coverage;
-* `storage.py` owns the SQLite schema, migrations, and queries;
+* `storage.py` owns the SQLite schema, migrations, counter aggregates, bounded
+  detection cursor, and daily destination-port counts;
 * `rendering.py` produces report text without external side effects;
 * `workflows.py` coordinates transactions, collection, and direct invocation of
   the shared `mail-notifier/send-mail.sh` transport;
@@ -258,4 +327,5 @@ RouterOS `www-ssl`, create an account, or install systemd units on a live host.
 
 RouterOS REST behavior and rule counters are documented by [MikroTik REST API](https://manual.mikrotik.com/docs/developer-guides/rest-api/)
 and [MikroTik firewall matchers](https://manual.mikrotik.com/docs/firewall-and-quality-of-service/firewall/common-firewall-matchers-and-actions/).
+The dedicated memory buffer follows [MikroTik logging](https://manual.mikrotik.com/docs/system/logging/).
 The user group policies and address restriction are documented by [MikroTik User](https://manual.mikrotik.com/docs/authentication-authorization-accounting/user/).

@@ -6,6 +6,28 @@ from mikrotik_reporting.rendering import render_monthly_report, render_weekly_re
 
 
 class RenderingTests(unittest.TestCase):
+    def test_detected_destination_ports_are_compact_and_labeled(self) -> None:
+        period = empty_period("2026-09-21")
+        rendered = render_weekly_report(
+            period,
+            UTC,
+            completed=False,
+            top_ports=[
+                {"protocol": "udp", "destination_port": 6881, "detections": 312},
+                {"protocol": "tcp", "destination_port": 22, "detections": 1},
+            ],
+        )
+        self.assertIn("Top detected destination ports", rendered)
+        self.assertIn("6881/udp", rendered)
+        self.assertIn("312 detections", rendered)
+        self.assertIn("22/tcp", rendered)
+        self.assertIn("1 detection\n", rendered)
+        self.assertIn("detection events, not unique attacks or packets", rendered)
+
+    def test_empty_destination_port_data_is_explicit(self) -> None:
+        rendered = render_monthly_report(empty_period("2026-09-01"), None, UTC, [])
+        self.assertIn("No detection events recorded", rendered)
+
     def test_weekly_comparison_zero_baseline_and_missing_history(self) -> None:
         previous = empty_period("2026-09-14")
         current = empty_period("2026-09-21")

@@ -9,7 +9,12 @@ from zoneinfo import ZoneInfo
 
 from helpers import UTC, at, common, mail, router, sample
 from mikrotik_reporting.aggregation import apply_snapshot
-from mikrotik_reporting.models import empty_period, initial_state
+from mikrotik_reporting.models import (
+    DetectionBatch,
+    DetectionEvent,
+    empty_period,
+    initial_state,
+)
 from mikrotik_reporting.rendering import render_monthly_report
 from mikrotik_reporting.storage import (
     aggregate_month,
@@ -18,6 +23,7 @@ from mikrotik_reporting.storage import (
     open_database,
     open_database_existing,
     open_database_readonly,
+    record_detection_batch,
     save_day,
     save_state,
 )
@@ -78,12 +84,40 @@ class WorkflowTests(unittest.TestCase):
             delivery = mail(Path(temporary))
             with closing(open_database(path)) as database, database:
                 save_state(database, first)
+                record_detection_batch(database, {"fingerprints": [], "events": []})
+                record_detection_batch(
+                    database,
+                    {
+                        "fingerprints": ["weekly-port"],
+                        "events": [
+                            {
+                                "fingerprint": "weekly-port",
+                                "day": "2026-09-15",
+                                "source_ip": "192.0.2.10",
+                                "protocol": "tcp",
+                                "destination_port": 22,
+                            }
+                        ],
+                    },
+                )
             with (
                 closing(open_database_existing(path)) as database,
-                patch("mikrotik_reporting.workflows._send_weekly_report"),
+                patch(
+                    "mikrotik_reporting.workflows._send_weekly_report"
+                ) as first_sender,
                 redirect_stdout(StringIO()),
             ):
                 process_weekly_reports(database, shared, delivery, at(21, 1))
+                self.assertEqual(
+                    first_sender.call_args.kwargs["top_ports"],
+                    [
+                        {
+                            "protocol": "tcp",
+                            "destination_port": 22,
+                            "detections": 1,
+                        }
+                    ],
+                )
             with closing(open_database_existing(path)) as database, database:
                 state = load_state(database, "2026-09-21")
                 state["period"]["samples"] = 2016
@@ -119,8 +153,15 @@ class WorkflowTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "report.sqlite3"
-            with patch(
-                "mikrotik_reporting.workflows.fetch_snapshot", side_effect=snapshots
+            with (
+                patch(
+                    "mikrotik_reporting.workflows.fetch_snapshot",
+                    side_effect=snapshots,
+                ),
+                patch(
+                    "mikrotik_reporting.workflows.fetch_detection_batch",
+                    return_value={"fingerprints": [], "events": []},
+                ),
             ):
                 for instant in times:
                     with redirect_stdout(StringIO()):
@@ -135,6 +176,53 @@ class WorkflowTests(unittest.TestCase):
                 self.assertEqual(weekly["totals"]["local"]["packets"], 30)
                 self.assertEqual(september["samples"], 2)
                 self.assertEqual(october["samples"], 1)
+
+    def test_collection_baselines_then_records_new_detection_logs(self) -> None:
+        baseline_event: DetectionEvent = {
+            "fingerprint": "baseline",
+            "day": "2026-09-19",
+            "source_ip": "192.0.2.30",
+            "protocol": "tcp",
+            "destination_port": 22,
+        }
+        new_event: DetectionEvent = {
+            "fingerprint": "new",
+            "day": "2026-09-19",
+            "source_ip": "192.0.2.31",
+            "protocol": "tcp",
+            "destination_port": 23,
+        }
+        batches: tuple[DetectionBatch, DetectionBatch] = (
+            {"fingerprints": ["baseline"], "events": [baseline_event]},
+            {
+                "fingerprints": ["baseline", "new"],
+                "events": [baseline_event, new_event],
+            },
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "report.sqlite3"
+            with (
+                patch(
+                    "mikrotik_reporting.workflows.fetch_snapshot",
+                    side_effect=(
+                        sample(100, 10000, uptime=10000),
+                        sample(110, 11000, uptime=10300),
+                    ),
+                ),
+                patch(
+                    "mikrotik_reporting.workflows.fetch_detection_batch",
+                    side_effect=batches,
+                ),
+                redirect_stdout(StringIO()),
+            ):
+                collect(common(path), router(), at(19, 10))
+                collect(common(path), router(), at(19, 11))
+            with closing(open_database_readonly(path)) as database:
+                ports = database.execute(
+                    "SELECT protocol, destination_port, detections "
+                    "FROM daily_detection_events"
+                ).fetchall()
+            self.assertEqual([tuple(row) for row in ports], [("tcp", 23, 1)])
 
     def test_monthly_mail_failure_retries_without_duplicate(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -183,6 +271,29 @@ class WorkflowTests(unittest.TestCase):
             with closing(open_database(path)) as database, database:
                 save_day(database, august)
                 save_day(database, september)
+                record_detection_batch(database, {"fingerprints": [], "events": []})
+                record_detection_batch(
+                    database,
+                    {
+                        "fingerprints": ["august-port", "september-port"],
+                        "events": [
+                            {
+                                "fingerprint": "august-port",
+                                "day": "2026-08-20",
+                                "source_ip": "192.0.2.20",
+                                "protocol": "udp",
+                                "destination_port": 6881,
+                            },
+                            {
+                                "fingerprint": "september-port",
+                                "day": "2026-09-20",
+                                "source_ip": "192.0.2.21",
+                                "protocol": "tcp",
+                                "destination_port": 23,
+                            },
+                        ],
+                    },
+                )
             with (
                 closing(open_database_existing(path)) as database,
                 patch("mikrotik_reporting.workflows._send_monthly_report") as sender,
@@ -195,6 +306,10 @@ class WorkflowTests(unittest.TestCase):
                     datetime(2026, 9, 30, 23, tzinfo=timezone.utc),
                 )
                 self.assertEqual(sender.call_args.args[2]["start"], "2026-08-01")
+                self.assertEqual(
+                    sender.call_args.kwargs["top_ports"][0]["destination_port"],
+                    6881,
+                )
                 process_monthly_reports(
                     database,
                     shared,
@@ -205,6 +320,10 @@ class WorkflowTests(unittest.TestCase):
                 current, previous = sender.call_args.args[2:]
                 self.assertEqual(current["start"], "2026-09-01")
                 self.assertEqual(previous["start"], "2026-08-01")
+                self.assertEqual(
+                    sender.call_args.kwargs["top_ports"][0]["destination_port"],
+                    23,
+                )
                 self.assertIn(
                     "Local packets: 30 vs 10; +20 (+200.0%, up)",
                     render_monthly_report(current, previous, UTC),

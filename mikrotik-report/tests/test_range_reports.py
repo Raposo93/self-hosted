@@ -17,6 +17,7 @@ from mikrotik_reporting.models import empty_period
 from mikrotik_reporting.storage import (
     aggregate_range,
     open_database,
+    record_detection_batch,
     save_day,
 )
 from mikrotik_reporting.workflows import print_range_report
@@ -110,6 +111,22 @@ class RangeReportTests(unittest.TestCase):
             day["samples"] = 1
             with closing(open_database(path)) as database, database:
                 save_day(database, day)
+                record_detection_batch(database, {"fingerprints": [], "events": []})
+                record_detection_batch(
+                    database,
+                    {
+                        "fingerprints": ["range-port"],
+                        "events": [
+                            {
+                                "fingerprint": "range-port",
+                                "day": "2026-09-16",
+                                "source_ip": "192.0.2.40",
+                                "protocol": "tcp",
+                                "destination_port": 22,
+                            }
+                        ],
+                    },
+                )
             arguments = [
                 "mikrotik_report.py",
                 "range",
@@ -130,6 +147,7 @@ class RangeReportTests(unittest.TestCase):
             ):
                 main()
             self.assertIn("2026-09-16 to 2026-09-17", output.getvalue())
+            self.assertIn("22/tcp", output.getvalue())
 
 
 if __name__ == "__main__":

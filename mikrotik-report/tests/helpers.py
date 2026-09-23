@@ -51,6 +51,8 @@ def router() -> RouterOSConfig:
         local_table="raw",
         crowdsec_list="crowdsec-banned",
         crowdsec_signature="@cs-routeros-bouncer",
+        detection_log_buffer="mikrotik-report",
+        detection_log_prefix="mikrotik-report-detect",
         ssl_context=ssl.create_default_context(),
     )
 

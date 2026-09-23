@@ -12,7 +12,7 @@ from .aggregation import (
     month_window,
     week_window,
 )
-from .models import METRICS, Period, PeriodKind, PeriodWindow
+from .models import METRICS, Period, PeriodKind, PeriodWindow, PortDetection
 
 
 def _comparison_line(label: str, current: int, previous: int) -> str:
@@ -145,6 +145,19 @@ def _activity_lines(
     ]
 
 
+def _detected_port_lines(ports: list[PortDetection]) -> list[str]:
+    lines = ["Top detected destination ports"]
+    if not ports:
+        return lines + ["  No detection events recorded.", ""]
+    for item in ports:
+        label = f"{item['destination_port']}/{item['protocol']}"
+        detections = item["detections"]
+        noun = "detection" if detections == 1 else "detections"
+        lines.append(f"  {label:<12} {detections:>8,} {noun}")
+    lines.append("")
+    return lines
+
+
 def _report_footer(period: Period, *, comparisons: bool = True) -> list[str]:
     lines = [
         (
@@ -152,6 +165,7 @@ def _report_footer(period: Period, *, comparisons: bool = True) -> list[str]:
             "not unique IPs or attacks."
         ),
         "CrowdSec remains responsible for detecting and classifying attacks.",
+        "Detected-port counts are detection events, not unique attacks or packets.",
     ]
     if comparisons:
         lines.append(
@@ -179,6 +193,7 @@ def render_weekly_report(
     history: dict[str, Period] | None = None,
     *,
     completed: bool = True,
+    top_ports: list[PortDetection] | None = None,
 ) -> str:
     window = week_window(period["start"])
     lines = [
@@ -188,6 +203,7 @@ def render_weekly_report(
         ),
         "",
         *_activity_lines(period, timezone_, window),
+        *_detected_port_lines(top_ports or []),
     ]
     if completed:
         previous_start = (
@@ -205,7 +221,10 @@ def render_weekly_report(
 
 
 def render_monthly_report(
-    period: Period, previous: Period | None, timezone_: ZoneInfo
+    period: Period,
+    previous: Period | None,
+    timezone_: ZoneInfo,
+    top_ports: list[PortDetection] | None = None,
 ) -> str:
     window = month_window(period["start"])
     lines = [
@@ -215,6 +234,7 @@ def render_monthly_report(
         ),
         "",
         *_activity_lines(period, timezone_, window),
+        *_detected_port_lines(top_ports or []),
         *_comparison_lines(period, previous, timezone_, window),
         "",
         *_report_footer(period),
@@ -223,7 +243,10 @@ def render_monthly_report(
 
 
 def render_range_report(
-    period: Period, window: PeriodWindow, timezone_: ZoneInfo
+    period: Period,
+    window: PeriodWindow,
+    timezone_: ZoneInfo,
+    top_ports: list[PortDetection] | None = None,
 ) -> str:
     if window.kind != "range":
         raise ValueError("Range report requires an explicit range window")
@@ -234,6 +257,7 @@ def render_range_report(
         ),
         "",
         *_activity_lines(period, timezone_, window),
+        *_detected_port_lines(top_ports or []),
     ]
     if not comparable(period, window, timezone_):
         lines.extend(

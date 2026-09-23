@@ -16,6 +16,25 @@ class Snapshot(TypedDict):
     uptime: int
 
 
+class DetectionEvent(TypedDict):
+    fingerprint: str
+    day: str
+    source_ip: str
+    protocol: str
+    destination_port: int
+
+
+class DetectionBatch(TypedDict):
+    fingerprints: list[str]
+    events: list[DetectionEvent]
+
+
+class PortDetection(TypedDict):
+    protocol: str
+    destination_port: int
+    detections: int
+
+
 class Aggregate(TypedDict):
     totals: dict[str, dict[str, int]]
     max_sizes: dict[str, int]

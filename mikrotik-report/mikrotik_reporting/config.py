@@ -26,6 +26,8 @@ class RouterOSConfig:
     local_table: str
     crowdsec_list: str
     crowdsec_signature: str
+    detection_log_buffer: str
+    detection_log_prefix: str
     ssl_context: ssl.SSLContext
 
 
@@ -42,6 +44,13 @@ def _required(name: str) -> str:
     value = os.environ.get(name, "").strip()
     if not value:
         raise ValueError(f"{name} must be set")
+    return value
+
+
+def _defaulted(name: str, default: str) -> str:
+    value = os.environ.get(name, default).strip()
+    if not value:
+        raise ValueError(f"{name} must not be empty")
     return value
 
 
@@ -83,6 +92,12 @@ def load_routeros_config() -> RouterOSConfig:
         local_table=local_table,
         crowdsec_list=_required("MIKROTIK_CROWDSEC_LIST"),
         crowdsec_signature=_required("MIKROTIK_CROWDSEC_RULE_SIGNATURE"),
+        detection_log_buffer=_defaulted(
+            "MIKROTIK_DETECTION_LOG_BUFFER", "mikrotik-report"
+        ),
+        detection_log_prefix=_defaulted(
+            "MIKROTIK_DETECTION_LOG_PREFIX", "mikrotik-report-detect"
+        ),
         ssl_context=ssl.create_default_context(cafile=ca_file or None),
     )
 

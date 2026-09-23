@@ -10,18 +10,20 @@ from datetime import date, datetime, timedelta
 from .aggregation import (
     apply_snapshot,
     month_start,
+    month_window,
     range_window,
     roll_period,
     week_start,
+    week_window,
 )
 from .config import CommonConfig, MailConfig, RouterOSConfig
-from .models import Period, empty_period
+from .models import Period, PortDetection, empty_period
 from .rendering import (
     render_monthly_report,
     render_range_report,
     render_weekly_report,
 )
-from .routeros import fetch_snapshot
+from .routeros import fetch_detection_batch, fetch_snapshot
 from .storage import (
     aggregate_month,
     aggregate_range,
@@ -34,9 +36,11 @@ from .storage import (
     open_database_existing,
     open_database_readonly,
     queue_completed_months,
+    record_detection_batch,
     retain_sent_week,
     save_day,
     save_state,
+    top_detected_ports,
 )
 
 
@@ -61,10 +65,15 @@ def _send_weekly_report(
     period: Period,
     preview_at: datetime | None = None,
     history: dict[str, Period] | None = None,
+    top_ports: list[PortDetection] | None = None,
 ) -> None:
     subject = f"{mail.subject} ({period['start']})"
     body = render_weekly_report(
-        period, common.timezone, history, completed=preview_at is None
+        period,
+        common.timezone,
+        history,
+        completed=preview_at is None,
+        top_ports=top_ports,
     )
     if preview_at is not None:
         subject = f"[TEST] {subject}"
@@ -81,9 +90,10 @@ def _send_monthly_report(
     common: CommonConfig,
     period: Period,
     previous: Period | None,
+    top_ports: list[PortDetection] | None = None,
 ) -> None:
     subject = f"{mail.subject} ({period['start'][:7]})"
-    body = render_monthly_report(period, previous, common.timezone)
+    body = render_monthly_report(period, previous, common.timezone, top_ports)
     _deliver_report(mail, subject, body)
 
 
@@ -108,7 +118,9 @@ def process_weekly_reports(
             break
         period = state["pending"][0]
         history = load_history(database, period["start"])
-        _send_weekly_report(mail, common, period, history=history)
+        window = week_window(period["start"])
+        ports = top_detected_ports(database, window.start, window.end)
+        _send_weekly_report(mail, common, period, history=history, top_ports=ports)
         state["pending"].pop(0)
         save_state(database, state)
         retain_sent_week(database, period)
@@ -137,7 +149,9 @@ def process_monthly_reports(
             (date.fromisoformat(start) - timedelta(days=1)).replace(day=1).isoformat()
         )
         previous = aggregate_month(database, previous_start)
-        _send_monthly_report(mail, common, period, previous)
+        window = month_window(start)
+        ports = top_detected_ports(database, window.start, window.end)
+        _send_monthly_report(mail, common, period, previous, top_ports=ports)
         mark_month_sent(database, start, now.isoformat())
         database.commit()
         print(f"Sent report for month {start[:7]}")
@@ -145,17 +159,21 @@ def process_monthly_reports(
 
 def collect(common: CommonConfig, routeros: RouterOSConfig, now: datetime) -> None:
     snapshot = fetch_snapshot(routeros)
+    detections = fetch_detection_batch(routeros, now, common.timezone)
     with closing(open_database(common.state)) as database:
         database.execute("BEGIN IMMEDIATE")
         state = load_state(database, week_start(now, common.timezone))
         day = load_day(database, now.astimezone(common.timezone).date().isoformat())
-        apply_snapshot(state, snapshot, now, common.timezone, day)
+        router_reboot = apply_snapshot(state, snapshot, now, common.timezone, day)
+        recorded_detections = record_detection_batch(
+            database, detections, reset_cursor=router_reboot
+        )
         save_state(database, state)
         save_day(database, day)
         database.commit()
         print(
             f"Collected {len(snapshot['counters'])} rules for week "
-            f"{state['period']['start']}"
+            f"{state['period']['start']} and {recorded_detections} detection events"
         )
 
 
@@ -184,10 +202,12 @@ def send_preview(
     snapshot = fetch_snapshot(routeros)
     with closing(open_database_readonly(common.state)) as database:
         state = load_state(database, week_start(now, common.timezone))
+        window = week_window(state["period"]["start"])
+        ports = top_detected_ports(database, window.start, window.end)
     if state["last_sample_at"] is None:
         raise ValueError("Run collect before sending a test report")
     apply_snapshot(state, snapshot, now, common.timezone)
-    _send_weekly_report(mail, common, state["period"], preview_at=now)
+    _send_weekly_report(mail, common, state["period"], preview_at=now, top_ports=ports)
     print(f"Sent test report for week {state['period']['start']} (state unchanged)")
 
 
@@ -197,9 +217,13 @@ def print_range_report(common: CommonConfig, start: date, end: date) -> None:
         raise ValueError("Run collect before requesting a historical range")
     with closing(open_database_readonly(common.state)) as database:
         period = aggregate_range(database, window.start, window.end)
+        ports = top_detected_ports(database, window.start, window.end)
     print(
         render_range_report(
-            period or empty_period(window.start), window, common.timezone
+            period or empty_period(window.start),
+            window,
+            common.timezone,
+            ports,
         ),
         end="",
     )

@@ -71,7 +71,7 @@ def apply_snapshot(
     now: datetime,
     timezone_: ZoneInfo,
     daily: Period | None = None,
-) -> None:
+) -> bool:
     roll_period(state, week_start(now, timezone_))
     period = state["period"]
     aggregates = (period, daily) if daily is not None else (period,)
@@ -118,6 +118,7 @@ def apply_snapshot(
         aggregate["samples"] += 1
     state["last_sample_at"] = now.isoformat()
     state["last_uptime"] = snapshot["uptime"]
+    return reboot
 
 
 def expected_samples(window: PeriodWindow, timezone_: ZoneInfo) -> int:

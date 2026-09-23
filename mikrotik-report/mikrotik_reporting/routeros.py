@@ -3,17 +3,56 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import ipaddress
 import json
 import re
 import urllib.parse
 import urllib.request
+from datetime import datetime, timedelta
 from typing import Any, cast
+from zoneinfo import ZoneInfo
 
 from .config import RouterOSConfig
-from .models import METRICS, Snapshot
+from .models import METRICS, DetectionBatch, DetectionEvent, Snapshot
 
 RULE_FIELDS = ".id,comment,action,src-address-list,packets,bytes,disabled,invalid"
 UPTIME_PART = re.compile(r"(\d+)([ywdhms])")
+LOG_TIME = re.compile(
+    r"(?:(?P<month>[a-z]{3})/(?P<day>\d{1,2})(?:/(?P<year>\d{4}))? )?"
+    r"(?P<hour>\d{2}):(?P<minute>\d{2}):(?P<second>\d{2})(?:\.(?P<fraction>\d+))?",
+    re.IGNORECASE,
+)
+ISO_LOG_TIME = re.compile(
+    r"(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2}) "
+    r"(?P<hour>\d{2}):(?P<minute>\d{2}):(?P<second>\d{2})"
+    r"(?:\.(?P<fraction>\d+))?"
+)
+PORT_PROTOCOL = re.compile(r"\bproto (?P<protocol>TCP|UDP)\b", re.IGNORECASE)
+IPV4_PORTS = re.compile(
+    r"(?P<source>(?:\d{1,3}\.){3}\d{1,3}):\d+->"
+    r"(?:\d{1,3}\.){3}\d{1,3}:(?P<destination_port>\d+)\b"
+)
+MONTHS = {
+    name: number
+    for number, name in enumerate(
+        (
+            "jan",
+            "feb",
+            "mar",
+            "apr",
+            "may",
+            "jun",
+            "jul",
+            "aug",
+            "sep",
+            "oct",
+            "nov",
+            "dec",
+        ),
+        start=1,
+    )
+}
 
 
 def _get_json(
@@ -72,6 +111,139 @@ def uptime_seconds(value: object) -> int:
     if position != len(value) or not value:
         raise ValueError("Invalid RouterOS uptime")
     return seconds
+
+
+def _microseconds(fraction: str | None) -> int:
+    return int((fraction or "").ljust(6, "0")[:6] or 0)
+
+
+def log_datetime(value: object, reference: datetime, timezone_: ZoneInfo) -> datetime:
+    if not isinstance(value, str):
+        raise TypeError("Invalid RouterOS log time")
+    local_reference = reference.astimezone(timezone_)
+    iso = ISO_LOG_TIME.fullmatch(value)
+    if iso:
+        parts = iso.groupdict()
+        return datetime(
+            int(parts["year"]),
+            int(parts["month"]),
+            int(parts["day"]),
+            int(parts["hour"]),
+            int(parts["minute"]),
+            int(parts["second"]),
+            _microseconds(parts["fraction"]),
+            timezone_,
+        )
+    match = LOG_TIME.fullmatch(value)
+    if not match:
+        raise ValueError("Invalid RouterOS log time")
+    parts = match.groupdict()
+    month_name = parts["month"]
+    if month_name is None:
+        year = local_reference.year
+        month = local_reference.month
+        day = local_reference.day
+    else:
+        month = MONTHS.get(month_name.lower(), 0)
+        if not month:
+            raise ValueError("Invalid RouterOS log time")
+        year = int(parts["year"] or local_reference.year)
+        day = int(parts["day"])
+    parsed = datetime(
+        year,
+        month,
+        day,
+        int(parts["hour"]),
+        int(parts["minute"]),
+        int(parts["second"]),
+        _microseconds(parts["fraction"]),
+        timezone_,
+    )
+    if (
+        month_name is not None
+        and parts["year"] is None
+        and parsed > local_reference + timedelta(days=1)
+    ):
+        parsed = parsed.replace(year=parsed.year - 1)
+    return parsed
+
+
+def _detection_event(
+    row: dict[str, Any],
+    config: RouterOSConfig,
+    reference: datetime,
+    timezone_: ZoneInfo,
+) -> DetectionEvent | None:
+    message = row.get("message")
+    if not isinstance(message, str) or not message.startswith(
+        config.detection_log_prefix
+    ):
+        return None
+    protocol_match = PORT_PROTOCOL.search(message)
+    if protocol_match is None:
+        return None
+    ports = IPV4_PORTS.search(message)
+    if ports is None:
+        raise ValueError("Invalid RouterOS detection log message")
+    source = str(ipaddress.IPv4Address(ports.group("source")))
+    destination_port = int(ports.group("destination_port"))
+    if destination_port > 65535:
+        raise ValueError("Invalid RouterOS detection destination port")
+    entry_id = row.get(".id")
+    entry_time = row.get("time")
+    if not isinstance(entry_id, str) or not entry_id:
+        raise ValueError("RouterOS detection log entry has no .id")
+    occurred_at = log_datetime(entry_time, reference, timezone_)
+    fingerprint = hashlib.sha256(
+        f"{entry_id}\0{entry_time}\0{message}".encode()
+    ).hexdigest()
+    return {
+        "fingerprint": fingerprint,
+        "day": occurred_at.date().isoformat(),
+        "source_ip": source,
+        "protocol": protocol_match.group("protocol").lower(),
+        "destination_port": destination_port,
+    }
+
+
+def fetch_detection_batch(
+    config: RouterOSConfig, reference: datetime, timezone_: ZoneInfo
+) -> DetectionBatch:
+    rows = _rows(
+        _get_json(
+            config,
+            "log",
+            {
+                "buffer": config.detection_log_buffer,
+                ".proplist": ".id,time,topics,message",
+            },
+        ),
+        "detection log",
+    )
+    fingerprints = []
+    events = []
+    seen = set()
+    for row in rows:
+        message = row.get("message")
+        if not isinstance(message, str) or not message.startswith(
+            config.detection_log_prefix
+        ):
+            continue
+        entry_id = row.get(".id")
+        entry_time = row.get("time")
+        if not isinstance(entry_id, str) or not entry_id:
+            raise ValueError("RouterOS detection log entry has no .id")
+        fingerprint = hashlib.sha256(
+            f"{entry_id}\0{entry_time}\0{message}".encode()
+        ).hexdigest()
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        fingerprints.append(fingerprint)
+        event = _detection_event(row, config, reference, timezone_)
+        if event is not None:
+            events.append(event)
+    return {"fingerprints": fingerprints, "events": events}
 
 
 def fetch_snapshot(config: RouterOSConfig) -> Snapshot:
