@@ -21,7 +21,7 @@ from .models import (
     initial_state,
 )
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 HISTORY_WEEKS = 12
 
 
@@ -116,7 +116,21 @@ def _migrate_to_2(database: sqlite3.Connection) -> None:
     """)
 
 
-MIGRATIONS = {1: _migrate_to_1, 2: _migrate_to_2}
+def _migrate_to_3(database: sqlite3.Connection) -> None:
+    database.executescript("""
+        BEGIN IMMEDIATE;
+        CREATE TABLE IF NOT EXISTS daily_source_detections (
+            day TEXT NOT NULL,
+            source_ip TEXT NOT NULL,
+            detections INTEGER NOT NULL CHECK (detections > 0),
+            PRIMARY KEY (day, source_ip)
+        );
+        PRAGMA user_version = 3;
+        COMMIT;
+    """)
+
+
+MIGRATIONS = {1: _migrate_to_1, 2: _migrate_to_2, 3: _migrate_to_3}
 
 
 def ensure_schema(database: sqlite3.Connection) -> None:
@@ -249,6 +263,13 @@ def record_detection_batch(
                     event["protocol"],
                     event["destination_port"],
                 ),
+            )
+            database.execute(
+                "INSERT INTO daily_source_detections "
+                "(day, source_ip, detections) VALUES (?, ?, 1) "
+                "ON CONFLICT(day, source_ip) "
+                "DO UPDATE SET detections = detections + 1",
+                (event["day"], event["source_ip"]),
             )
             recorded += 1
     database.execute("DELETE FROM detection_log_cursor")
