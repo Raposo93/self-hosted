@@ -7,13 +7,24 @@ import subprocess
 from contextlib import closing
 from datetime import date, datetime, timedelta
 
-from .aggregation import apply_snapshot, month_start, roll_period, week_start
+from .aggregation import (
+    apply_snapshot,
+    month_start,
+    range_window,
+    roll_period,
+    week_start,
+)
 from .config import CommonConfig, MailConfig, RouterOSConfig
 from .models import Period, empty_period
-from .rendering import render_monthly_report, render_weekly_report
+from .rendering import (
+    render_monthly_report,
+    render_range_report,
+    render_weekly_report,
+)
 from .routeros import fetch_snapshot
 from .storage import (
     aggregate_month,
+    aggregate_range,
     load_day,
     load_history,
     load_state,
@@ -178,3 +189,17 @@ def send_preview(
     apply_snapshot(state, snapshot, now, common.timezone)
     _send_weekly_report(mail, common, state["period"], preview_at=now)
     print(f"Sent test report for week {state['period']['start']} (state unchanged)")
+
+
+def print_range_report(common: CommonConfig, start: date, end: date) -> None:
+    window = range_window(start.isoformat(), end.isoformat())
+    if not common.state.is_file():
+        raise ValueError("Run collect before requesting a historical range")
+    with closing(open_database_readonly(common.state)) as database:
+        period = aggregate_range(database, window.start, window.end)
+    print(
+        render_range_report(
+            period or empty_period(window.start), window, common.timezone
+        ),
+        end="",
+    )

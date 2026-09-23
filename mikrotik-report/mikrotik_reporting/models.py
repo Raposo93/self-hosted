@@ -7,7 +7,7 @@ from typing import Literal, TypedDict
 
 SOURCES = ("local", "crowdsec")
 METRICS = ("packets", "bytes")
-PeriodKind = Literal["day", "week", "month"]
+PeriodKind = Literal["day", "week", "month", "range"]
 
 
 class Snapshot(TypedDict):

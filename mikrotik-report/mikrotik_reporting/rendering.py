@@ -112,7 +112,7 @@ def _activity_lines(
     def value(number: int) -> str:
         return (
             f"{number:,}"
-            if period["samples"] or window.kind != "month"
+            if period["samples"] or window.kind not in ("month", "range")
             else "unavailable"
         )
 
@@ -145,18 +145,21 @@ def _activity_lines(
     ]
 
 
-def _report_footer(period: Period) -> list[str]:
+def _report_footer(period: Period, *, comparisons: bool = True) -> list[str]:
     lines = [
         (
             "Counters measure packets and bytes discarded by the selected rules, "
             "not unique IPs or attacks."
         ),
         "CrowdSec remains responsible for detecting and classifying attacks.",
-        (
+    ]
+    if comparisons:
+        lines.append(
             "Expected samples and coverage are approximate; comparisons require at "
             f"least {MIN_COMPARABLE_COVERAGE:.0%} sample coverage in both periods."
-        ),
-    ]
+        )
+    else:
+        lines.append("Expected samples and coverage are approximate.")
     if period["samples"] == 0:
         lines.extend(
             (
@@ -216,4 +219,36 @@ def render_monthly_report(
         "",
         *_report_footer(period),
     ]
+    return "\n".join(lines) + "\n"
+
+
+def render_range_report(
+    period: Period, window: PeriodWindow, timezone_: ZoneInfo
+) -> str:
+    if window.kind != "range":
+        raise ValueError("Range report requires an explicit range window")
+    lines = [
+        (
+            f"MikroTik blocking report: {window.start} to {window.end} "
+            f"({timezone_.key}, start inclusive, end exclusive)"
+        ),
+        "",
+        *_activity_lines(period, timezone_, window),
+    ]
+    if not comparable(period, window, timezone_):
+        lines.extend(
+            (
+                "Historical coverage",
+                "  Unavailable: no persisted daily samples in the requested range."
+                if period["samples"] == 0
+                else "  Incomplete: totals include observed samples only.",
+                "",
+            )
+        )
+    lines.extend(
+        (
+            "Address-list latest values are from the last sampled day in the range.",
+            *_report_footer(period, comparisons=False),
+        )
+    )
     return "\n".join(lines) + "\n"

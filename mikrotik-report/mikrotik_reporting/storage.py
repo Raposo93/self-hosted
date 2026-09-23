@@ -145,31 +145,41 @@ def save_day(database: sqlite3.Connection, day: Period) -> None:
     )
 
 
-def aggregate_month(database: sqlite3.Connection, start: str) -> Period | None:
+def aggregate_range(
+    database: sqlite3.Connection, start: str, end: str
+) -> Period | None:
+    if not database.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'daily_aggregates'"
+    ).fetchone():
+        return None
     rows = database.execute(
         "SELECT data FROM daily_aggregates WHERE day >= ? AND day < ? ORDER BY day",
-        (start, next_month(start)),
+        (start, end),
     ).fetchall()
     if not rows:
         return None
-    month = empty_period(start)
+    aggregate = empty_period(start)
     for row in rows:
         day = cast("Period", json.loads(row["data"]))
         for source in SOURCES:
             for metric in METRICS:
-                month["totals"][source][metric] += day["totals"][source][metric]
-            month["max_sizes"][source] = max(
-                month["max_sizes"][source], day["max_sizes"][source]
+                aggregate["totals"][source][metric] += day["totals"][source][metric]
+            aggregate["max_sizes"][source] = max(
+                aggregate["max_sizes"][source], day["max_sizes"][source]
             )
-            month["last_sizes"][source] = day["last_sizes"][source]
+            aggregate["last_sizes"][source] = day["last_sizes"][source]
         for field in (
             "samples",
             "router_reboots",
             "counter_resets",
             "rule_rebaselines",
         ):
-            month[field] += day[field]
-    return month
+            aggregate[field] += day[field]
+    return aggregate
+
+
+def aggregate_month(database: sqlite3.Connection, start: str) -> Period | None:
+    return aggregate_range(database, start, next_month(start))
 
 
 def queue_completed_months(database: sqlite3.Connection, current: str) -> None:

@@ -47,6 +47,14 @@ def day_window(start: str) -> PeriodWindow:
     return PeriodWindow(start=start, end=end, kind="day")
 
 
+def range_window(start: str, end: str) -> PeriodWindow:
+    first = date.fromisoformat(start)
+    last = date.fromisoformat(end)
+    if first >= last:
+        raise ValueError("Range start must be before its exclusive end")
+    return PeriodWindow(start=start, end=end, kind="range")
+
+
 def roll_period(state: State, start: str) -> None:
     current = state["period"]["start"]
     while current < start:

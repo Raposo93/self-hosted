@@ -3,8 +3,9 @@
 A small Python 3 collector polls RouterOS over its HTTPS REST API and saves IPv4
 drop-rule counters in a local SQLite database. Separate commands email summaries
 for completed Monday-to-Monday weeks and calendar months through the repository's
-`mail-notifier/send-mail.sh`. Install it on any Linux host that can reach the
-router; no server names or credentials are built into the program.
+`mail-notifier/send-mail.sh`; an interactive command renders explicit historical
+date ranges to stdout. Install it on any Linux host that can reach the router;
+no server names or credentials are built into the program.
 
 The two report sections have different meanings. The local rule measures packets
 discarded by the router's own detection list. Bouncer rules measure traffic
@@ -133,6 +134,33 @@ subject and a clear test banner. It does not update counters, close a week, or
 remove pending reports. Success prints `Sent test report`; a RouterOS or mail
 failure exits nonzero. The preview may include the latest observed counter
 delta, which the next scheduled collection will still record normally.
+
+To inspect an arbitrary historical interval, run `range` as a user that can read
+the configured database:
+
+```bash
+cd /path/to/self-hosted/mikrotik-report
+MIKROTIK_REPORT_DB=/var/lib/mikrotik-report/report.sqlite3 \
+MIKROTIK_REPORT_TIMEZONE=Europe/Madrid \
+  python3 mikrotik_report.py range --from 2026-09-16 --to 2026-10-03
+```
+
+`--from` is inclusive and `--to` is exclusive. Both are local-calendar dates in
+`MIKROTIK_REPORT_TIMEZONE`, so the example covers September 16 at 00:00 through
+October 3 at 00:00 in that timezone. The command reads persisted daily
+aggregates and writes only to stdout; it does not contact RouterOS, modify the
+database, or send mail. Consequently, only `MIKROTIK_REPORT_DB` and optionally
+`MIKROTIK_REPORT_TIMEZONE` are needed when invoking it outside the full service
+environment.
+
+Range totals include samples persisted inside the requested dates, including
+ranges that cross weekly or monthly boundaries. Address-list maxima cover all
+sampled days and the latest size comes from the last sampled day. The quality
+block compares observed samples with the nominal five-minute cadence over the
+exact interval. Partial coverage is marked explicitly and totals then describe
+only observed samples; a range with no persisted samples reports activity as
+unavailable rather than zero. Data from before daily aggregate collection was
+introduced cannot be reconstructed from current RouterOS counters.
 
 The first collection establishes a baseline; it does not claim traffic that
 occurred before installation. Each later sample adds the difference from the
