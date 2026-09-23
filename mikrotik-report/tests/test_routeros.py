@@ -26,9 +26,9 @@ class RouterOSTests(unittest.TestCase):
                 return [
                     {
                         ".id": "*1",
-                        "comment": "Drop WAN scanners",
+                        "comment": "Drop local detections",
                         "action": "drop",
-                        "src-address-list": "wan-scanners",
+                        "src-address-list": "local-detections",
                         "packets": "12",
                         "bytes": "1200",
                     },
@@ -55,7 +55,7 @@ class RouterOSTests(unittest.TestCase):
             if path == "ip/firewall/address-list":
                 return (
                     [{".id": "*A"}, {".id": "*B"}]
-                    if params["list"] == "wan-scanners"
+                    if params["list"] == "local-detections"
                     else [{".id": "*C"}]
                 )
             if path == "system/resource":
