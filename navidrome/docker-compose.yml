@@ -4,8 +4,8 @@ services:
     container_name: navidrome
     restart: unless-stopped
     ports:
-      - "127.0.0.1:4533:4533"
-    user: "1000:1000"
+      - "${NAVIDROME_BIND}:${NAVIDROME_PORT}:4533"
+    user: "${PUID}:${PGID}"
     volumes:
       - "${MUSIC_DIR}:/music:ro"
       - ./data:/data

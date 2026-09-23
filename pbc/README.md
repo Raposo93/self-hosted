@@ -28,13 +28,13 @@ Each backup profile uses its own environment file and can be scheduled with a sy
 Copy the example using a profile name:
 
 ```bash
-cp .env.example .env.photos
+cp .env.example .env.example-profile
 ```
 
 Example:
 
 ```bash
-LOGFILE="/var/log/pbc/photos.log"
+LOGFILE="/var/log/pbc/example-profile.log"
 SOURCE_DIR="/path/to/data"
 REPO="user@realm!api_token_name@host:datastore"
 BACKUP_NAME="data.pxar"
@@ -44,7 +44,7 @@ SENDER_EMAIL="sender@example.com"
 MSMTP_ACCOUNT="default"
 ```
 
-Profile files such as `.env.photos` or `.env.ssh` must not be committed.
+Profile files such as `.env.example-profile` or `.env.ssh` must not be committed.
 
 Repository format:
 
@@ -80,13 +80,13 @@ sudo systemd-ask-password -n "PBS fingerprint: " \
       /root/.config/proxmox-backup/<profile>-fingerprint.cred
 ```
 
-For example, the `photos` profile uses:
+For example, the `example-profile` profile uses:
 
 ```text
-.env.photos
-photos-api-token.cred
-photos-fingerprint.cred
-pbc-backup@photos.service
+.env.example-profile
+example-profile-api-token.cred
+example-profile-fingerprint.cred
+pbc-backup@example-profile.service
 ```
 
 Protect the files:
@@ -125,21 +125,21 @@ sudo systemctl daemon-reload
 A profile is selected through the instance name:
 
 ```text
-pbc-backup@photos.service -> .env.photos
-pbc-backup@ssh.service    -> .env.ssh
+pbc-backup@example-profile.service -> .env.example-profile
+pbc-backup@example-profile.service    -> .env.ssh
 ```
 
 Test a profile manually:
 
 ```bash
-sudo systemctl start pbc-backup@photos.service
-sudo systemctl status pbc-backup@photos.service
+sudo systemctl start pbc-backup@example-profile.service
+sudo systemctl status pbc-backup@example-profile.service
 ```
 
 View logs:
 
 ```bash
-journalctl -u pbc-backup@photos.service
+journalctl -u pbc-backup@example-profile.service
 ```
 
 ## Scheduling
@@ -153,7 +153,7 @@ sudo cp pbc-backup-daily@.timer.example \
   /etc/systemd/system/pbc-backup-daily@.timer
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now pbc-backup-daily@photos.timer
+sudo systemctl enable --now pbc-backup-daily@example-profile.timer
 ```
 
 Default schedule:
@@ -171,7 +171,7 @@ sudo cp pbc-backup-uptime@.timer.example \
   /etc/systemd/system/pbc-backup-uptime@.timer
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now pbc-backup-uptime@ssh.timer
+sudo systemctl enable --now pbc-backup-uptime@example-profile.timer
 ```
 
 Default behavior:

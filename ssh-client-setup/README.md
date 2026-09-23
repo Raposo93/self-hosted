@@ -45,31 +45,31 @@ password or another already-authorized SSH key.
 Example:
 
 ```bash
-./setup-ssh-host.sh gserver gonzalo 10.1.1.11
+./setup-ssh-host.sh example-host admin 192.0.2.10
 ```
 
 This creates or reuses:
 
 ```text
-~/.ssh/id_ed25519_gserver
-~/.ssh/id_ed25519_gserver.pub
+~/.ssh/id_ed25519_example-host
+~/.ssh/id_ed25519_example-host.pub
 ```
 
 and manages this block in `~/.ssh/config`:
 
 ```text
-# BEGIN self-hosted ssh-client-setup: gserver
-Host gserver
-    HostName 10.1.1.11
-    User gonzalo
-    IdentityFile ~/.ssh/id_ed25519_gserver
-# END self-hosted ssh-client-setup: gserver
+# BEGIN self-hosted ssh-client-setup: example-host
+Host example-host
+    HostName 192.0.2.10
+    User admin
+    IdentityFile ~/.ssh/id_ed25519_example-host
+# END self-hosted ssh-client-setup: example-host
 ```
 
 Then connect with:
 
 ```bash
-ssh gserver
+ssh example-host
 ```
 
 ## Existing keys and config

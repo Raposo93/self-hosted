@@ -25,8 +25,8 @@ drop logging.
   tested RouterOS 7.24.4 installation, a custom group with
   `read,api,rest-api` worked; `read,rest-api` alone returned
   `not allowed (9)`. Restrict the account to the collecting host with its
-  `address` setting (`10.1.1.11/32` in that installation; use the actual
-  collector address elsewhere).
+  `address` setting (for example `192.0.2.10/32`; replace it with the
+  actual collector address).
 * `mail-notifier/send-mail.sh` in the same checkout, plus its configured `msmtp`
   account on the collecting host. Grant both report services access to the SMTP
   password through the dedicated `mail-notifier` group as described in the
@@ -54,10 +54,11 @@ Use an absolute `MIKROTIK_REPORT_DB` path outside the checkout. The SQLite
 database contains last counter values, current/pending weekly totals, the last
 12 successfully emailed weekly aggregates, and daily aggregates for exact month
 boundaries and later historical queries. Monthly delivery status is stored in
-the same database. Daily destination-port detection counts and a bounded cursor
-of the RouterOS memory entries seen during the previous poll are also stored;
-full firewall messages, source and destination addresses, interfaces, MAC
-addresses, and packet lengths are not retained. The schema uses SQLite's
+the same database. Daily destination-port counts, daily source-IP detection counts, and a bounded
+cursor of the RouterOS memory entries seen during the previous poll are also
+stored. Source IPs are retained only as aggregate keys; full firewall messages,
+destination addresses, interfaces, MAC addresses, and packet lengths are not
+retained. The schema uses SQLite's
 `user_version`; a writing command
 upgrades an older unversioned database before changing report state, while a
 database created by a newer unsupported version is rejected. Daily aggregates
@@ -71,11 +72,11 @@ password; neither it nor the database belongs in Git.
 ## RouterOS detection-event setup
 
 Destination-port rankings use a dedicated in-memory RouterOS log buffer. Do not
-enable logging on the `wan-scanners` drop rule: it matches every subsequent
+enable logging on the `local-detections` drop rule: it matches every subsequent
 packet and would create the per-packet logging this component is designed to
 avoid. Instead, enable logging only on the rule that initially detects a source
 and performs `add-src-to-address-list`. That rule must stop matching the source
-after adding it, normally through `src-address-list=!wan-scanners` or an
+after adding it, normally through `src-address-list=!local-detections` or an
 equivalent condition.
 
 Create a dedicated memory buffer and route only messages with the configured
@@ -90,7 +91,7 @@ Locate and inspect the detection rule before changing it. Adapt `raw` to
 `filter` if that is where the rule lives:
 
 ```routeros
-/ip/firewall/raw/print detail where action=add-src-to-address-list and address-list="wan-scanners"
+/ip/firewall/raw/print detail where action=add-src-to-address-list and address-list="local-detections"
 ```
 
 After confirming that the rule represents the first detection rather than the
@@ -133,7 +134,7 @@ access before enabling the report timers. The weekly and monthly services run
 as the same unprivileged user with `mail-notifier` added only to their processes.
 They have no `StateDirectory` so systemd does not change ownership of the
 collector's directory. Set the timezone in `.env` to the intended reporting
-timezone, for example `Europe/Madrid`.
+timezone, for example `Etc/UTC`.
 If a report timer runs before the first collection, it exits without creating
 the database; the collector creates it under its own user.
 
@@ -204,7 +205,7 @@ the configured database:
 ```bash
 cd /path/to/self-hosted/mikrotik-report
 MIKROTIK_REPORT_DB=/var/lib/mikrotik-report/report.sqlite3 \
-MIKROTIK_REPORT_TIMEZONE=Europe/Madrid \
+MIKROTIK_REPORT_TIMEZONE=Etc/UTC \
   python3 mikrotik_report.py range --from 2026-09-16 --to 2026-10-03
 ```
 

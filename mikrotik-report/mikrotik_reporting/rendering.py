@@ -117,7 +117,7 @@ def _activity_lines(
         )
 
     return [
-        "Local MikroTik detection (wan-scanners or configured local list)",
+        "Local MikroTik detection (configured local list)",
         f"  Packets dropped: {value(period['totals']['local']['packets'])}",
         f"  Bytes dropped: {value(period['totals']['local']['bytes'])}",
         (

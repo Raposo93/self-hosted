@@ -9,7 +9,7 @@ Create or reuse an Ed25519 key, copy it to the remote host, and manage the
 corresponding entry in ~/.ssh/config.
 
 Example:
-    setup-ssh-host.sh gserver gonzalo 10.1.1.11
+    setup-ssh-host.sh example-host admin 192.0.2.10
 USAGE
 }
 

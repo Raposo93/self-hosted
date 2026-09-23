@@ -1,8 +1,8 @@
 # self-hosted
 
-Personal self-hosted services, deployment files, infrastructure configuration and maintenance scripts.
+Reusable self-hosted services, deployment files, infrastructure configuration examples and maintenance scripts.
 
-This repository contains Docker Compose setups, system configuration examples and helper scripts used to run and maintain services on a private server.
+This repository contains Docker Compose setups, system configuration examples and helper scripts for self-hosted environments.
 
 ## Contents
 
@@ -113,11 +113,11 @@ Backup-related scripts live under `pbc/`.
 Each backup profile uses its own environment file. Review `pbc/.env.example` and copy it to `pbc/.env.<profile>`, for example:
 
 ```bash
-cp pbc/.env.example pbc/.env.photos
+cp pbc/.env.example pbc/.env.example-profile
 ```
 
 Adapt the values for the profile and keep `.env.*` files untracked.
 
 ## Notes
 
-This is a personal infrastructure repository. It is optimized for maintainability and recovery, not for being a generic production-ready template.
+Deployment-specific hostnames, addresses, credentials and topology belong in local configuration, not in the repository. The examples favor maintainability and recovery over production-framework complexity.

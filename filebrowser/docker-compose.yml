@@ -3,9 +3,9 @@ services:
     image: filebrowser/filebrowser:latest
     container_name: filebrowser
     restart: unless-stopped
-    user: "1000:1000"
+    user: "${PUID}:${PGID}"
     ports:
-      - "8089:80"
+      - "${FILEBROWSER_BIND}:${FILEBROWSER_PORT}:80"
     volumes:
       - ${DATA_DIR}:/srv
       - ./filebrowser_config:/config

@@ -80,9 +80,9 @@ Example:
 
 ```bash
 ./http-endpoint-monitor.sh \
-    --name navidrome \
-    --url https://navidrome.example.com \
-    --account mailjet \
+    --name service-a \
+    --url https://service-a.example.com \
+    --account notifications \
     --from alerts@example.com \
     --email-alert admin@example.com
 ```
@@ -108,16 +108,16 @@ Example:
 
 ```bash
 ./http-endpoint-monitor.sh \
-    --name immich \
-    --url https://photos.example.com \
-    --account mailjet \
+    --name service-a \
+    --url https://service-a.example.com \
+    --account notifications \
     --from alerts@example.com \
     --email-alert admin@example.com
 
 ./http-endpoint-monitor.sh \
-    --name blueiris \
-    --url https://cameras.example.com \
-    --account mailjet \
+    --name service-b \
+    --url https://service-b.example.com \
+    --account notifications \
     --from alerts@example.com \
     --email-alert admin@example.com
 ```
@@ -129,8 +129,8 @@ Each endpoint keeps an independent failure count and state.
 Run two checks every five minutes:
 
 ```cron
-*/5 * * * * /path/to/http-endpoint-monitor.sh --name immich --url https://photos.example.com --account mailjet --from alerts@example.com --email-alert admin@example.com
-*/5 * * * * /path/to/http-endpoint-monitor.sh --name blueiris --url https://cameras.example.com --account mailjet --from alerts@example.com --email-alert admin@example.com
+*/5 * * * * /path/to/http-endpoint-monitor.sh --name service-a --url https://service-a.example.com --account notifications --from alerts@example.com --email-alert admin@example.com
+*/5 * * * * /path/to/http-endpoint-monitor.sh --name service-b --url https://service-b.example.com --account notifications --from alerts@example.com --email-alert admin@example.com
 ```
 
 Use absolute paths when running the script from cron.
@@ -194,17 +194,17 @@ It also creates a `state` directory containing independent state and lock files:
 
 ```text
 state/
-├── immich.state
-├── immich.lock
-├── blueiris.state
-└── blueiris.lock
+├── service-a.state
+├── service-a.lock
+├── service-b.state
+└── service-b.lock
 ```
 
 The endpoint name is included in every log entry:
 
 ```text
-2026-07-21 14:05:01 [immich] OK http=200 tiempo=0.107368s
-2026-07-21 14:05:01 [blueiris] FALLO contador=1/3 http=502 curl=0 tiempo=1.086329s
+2026-07-21 14:05:01 [service-a] OK http=200 tiempo=0.107368s
+2026-07-21 14:05:01 [service-b] FALLO contador=1/3 http=502 curl=0 tiempo=1.086329s
 ```
 
 ## Exit codes

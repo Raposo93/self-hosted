@@ -8,7 +8,7 @@ services:
       - ./firefly_iii_upload:/var/www/html/storage/upload:rw
     env_file: .env
     ports:
-      - "0.0.0.0:4534:8080"
+      - "${FIREFLY_BIND}:${FIREFLY_PORT}:8080"
     networks:
       - firefly_iii
 

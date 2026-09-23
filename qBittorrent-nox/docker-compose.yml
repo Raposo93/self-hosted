@@ -6,8 +6,8 @@ services:
     container_name: qbittorrent-nox
     restart: unless-stopped
     environment:
-      - PGID=1000
-      - PUID=1000
+      - PGID=${PGID}
+      - PUID=${PUID}
       - QBT_LEGAL_NOTICE=${QBT_LEGAL_NOTICE}
       - QBT_VERSION=${QBT_VERSION}
       - QBT_WEBUI_PORT=${QBT_WEBUI_PORT}
@@ -16,8 +16,8 @@ services:
     image: qbittorrentofficial/qbittorrent-nox:${QBT_VERSION}
     ports:
       # for bittorrent traffic
-      - 6881:6881/tcp
-      - 6881:6881/udp
+      - ${QBT_TORRENT_PORT}:${QBT_TORRENT_PORT}/tcp
+      - ${QBT_TORRENT_PORT}:${QBT_TORRENT_PORT}/udp
       # for WebUI
       - ${QBT_WEBUI_PORT}:${QBT_WEBUI_PORT}/tcp
     #read_only: true
