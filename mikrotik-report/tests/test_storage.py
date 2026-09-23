@@ -116,6 +116,10 @@ class StorageTests(unittest.TestCase):
                 cursor_size = database.execute(
                     "SELECT COUNT(*) FROM detection_log_cursor"
                 ).fetchone()[0]
+            source_rows = database.execute(
+                "SELECT day, source_ip, detections "
+                "FROM daily_source_detections ORDER BY day, source_ip"
+            ).fetchall()
             self.assertEqual(
                 combined,
                 [
@@ -125,6 +129,14 @@ class StorageTests(unittest.TestCase):
                         "destination_port": 6881,
                         "detections": 1,
                     },
+                ],
+            )
+            self.assertEqual(
+                [tuple(row) for row in source_rows],
+                [
+                    ("2026-09-30", "192.0.2.2", 1),
+                    ("2026-10-01", "192.0.2.3", 1),
+                    ("2026-10-01", "192.0.2.4", 1),
                 ],
             )
             self.assertEqual(
@@ -163,10 +175,14 @@ class StorageTests(unittest.TestCase):
                     1,
                 )
                 ports = top_detected_ports(database, "2026-10-01", "2026-10-02")
+                source = database.execute(
+                    "SELECT source_ip, detections FROM daily_source_detections"
+                ).fetchone()
             self.assertEqual(
                 ports,
                 [{"protocol": "tcp", "destination_port": 22, "detections": 1}],
             )
+            self.assertEqual(tuple(source), ("192.0.2.5", 1))
 
     def test_legacy_database_is_migrated_without_losing_state(self) -> None:
         state = initial_state("2026-09-14")
@@ -193,6 +209,7 @@ class StorageTests(unittest.TestCase):
                     "detection_log_state",
                     "detection_log_cursor",
                     "daily_detection_events",
+                    "daily_source_detections",
                 ):
                     self.assertIsNotNone(
                         database.execute(
