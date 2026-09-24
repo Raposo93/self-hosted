@@ -9,6 +9,12 @@ services:
       - type: volume
         source: report-data
         target: /var/lib/mikrotik-report
+      - type: bind
+        source: "${MIKROTIK_CA_HOST_PATH:-/dev/null}"
+        target: /etc/ssl/certs/mikrotik-ca.crt
+        read_only: true
+        bind:
+          create_host_path: false
 
 volumes:
   report-data:
