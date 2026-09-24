@@ -2,8 +2,8 @@
 
 A small Python 3 collector polls RouterOS over its HTTPS REST API and saves IPv4
 drop-rule counters in a local SQLite database. Separate commands email summaries
-for completed Monday-to-Monday weeks and calendar months through the repository's
-`mail-notifier/send-mail.sh`; an interactive command renders explicit historical
+for completed Monday-to-Monday weeks and calendar months through a configured
+mail transport helper; an interactive command renders explicit historical
 date ranges to stdout. Install it on any Linux host that can reach the router;
 no server names or credentials are built into the program.
 
@@ -27,12 +27,15 @@ drop logging.
   `not allowed (9)`. Restrict the account to the collecting host with its
   `address` setting (for example `192.0.2.10/32`; replace it with the
   actual collector address).
-* `mail-notifier/send-mail.sh` in the same checkout, plus its configured `msmtp`
-  account on the collecting host. Grant both report services access to the SMTP
-  password through the dedicated `mail-notifier` group as described in the
-  [mail notifier setup](../mail-notifier/README.md#allow-a-non-root-service-to-send).
+* An external `send-mail.sh` transport helper configured with the absolute
+  `MIKROTIK_REPORT_NOTIFIER` path, plus its configured `msmtp` account on the
+  collecting host. The helper may live in another checkout. The current
+  `self-hosted` mail notifier remains compatible; grant both report services
+  access to its SMTP password through the dedicated `mail-notifier` group.
 
-Copy `.env.example` to a private `.env` and adapt every required value. The
+Copy `.env.example` to a private `.env` and adapt every required value.
+`MIKROTIK_REPORT_NOTIFIER` must be an absolute path; keeping the mail helper
+outside this project does not require any particular repository layout. The
 example selects the local `raw` rule by exact comment and source address list.
 Change `MIKROTIK_LOCAL_RULE_TABLE` to `filter` if the local drop rule is there.
 The bouncer selector matches the configured signature within a rule comment,
@@ -308,7 +311,7 @@ units. The implementation lives in the `mikrotik_reporting` package:
   detection cursor, and daily destination-port counts;
 * `rendering.py` produces report text without external side effects;
 * `workflows.py` coordinates transactions, collection, and direct invocation of
-  the shared `mail-notifier/send-mail.sh` transport;
+  the configured external mail transport;
 * `cli.py` maps the four existing commands to those workflows.
 
 Keep business decisions out of the CLI and SQLite helpers. New report formats

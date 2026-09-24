@@ -54,6 +54,13 @@ def _defaulted(name: str, default: str) -> str:
     return value
 
 
+def _required_absolute_path(name: str) -> Path:
+    path = Path(_required(name))
+    if not path.is_absolute():
+        raise ValueError(f"{name} must be an absolute path")
+    return path
+
+
 def load_common_config() -> CommonConfig:
     state = Path(_required("MIKROTIK_REPORT_DB"))
     if not state.is_absolute():
@@ -111,8 +118,7 @@ def load_mail_config(*, monthly: bool = False) -> MailConfig:
             if monthly
             else "MikroTik weekly blocking report",
         ),
-        notifier=Path(__file__).resolve().parent.parent.parent
-        / "mail-notifier/send-mail.sh",
+        notifier=_required_absolute_path("MIKROTIK_REPORT_NOTIFIER"),
         account=os.environ.get("MIKROTIK_REPORT_MAIL_ACCOUNT", ""),
         sender=os.environ.get("MIKROTIK_REPORT_FROM", ""),
     )
