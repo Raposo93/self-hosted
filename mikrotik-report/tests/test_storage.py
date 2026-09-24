@@ -153,6 +153,76 @@ class StorageTests(unittest.TestCase):
             )
             self.assertEqual(cursor_size, 3)
 
+    def test_repeated_source_events_increment_only_for_new_fingerprints(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "report.sqlite3"
+            first: DetectionBatch = {
+                "fingerprints": ["a", "b"],
+                "events": [
+                    {
+                        "fingerprint": "a",
+                        "day": "2026-09-21",
+                        "source_ip": "192.0.2.50",
+                        "protocol": "tcp",
+                        "destination_port": 22,
+                    },
+                    {
+                        "fingerprint": "b",
+                        "day": "2026-09-21",
+                        "source_ip": "192.0.2.50",
+                        "protocol": "tcp",
+                        "destination_port": 23,
+                    },
+                ],
+            }
+            later: DetectionBatch = {
+                "fingerprints": ["a", "b", "c"],
+                "events": [
+                    *first["events"],
+                    {
+                        "fingerprint": "c",
+                        "day": "2026-09-22",
+                        "source_ip": "192.0.2.50",
+                        "protocol": "udp",
+                        "destination_port": 6881,
+                    },
+                ],
+            }
+
+            with closing(open_database(path)) as database, database:
+                self.assertEqual(
+                    record_detection_batch(
+                        database,
+                        {"fingerprints": [], "events": []},
+                    ),
+                    0,
+                )
+                self.assertEqual(record_detection_batch(database, first), 2)
+                self.assertEqual(record_detection_batch(database, first), 0)
+                self.assertEqual(record_detection_batch(database, later), 1)
+
+                daily = database.execute(
+                    "SELECT day, source_ip, detections "
+                    "FROM daily_source_detections ORDER BY day"
+                ).fetchall()
+                sources = top_source_detections(
+                    database,
+                    "2026-09-21",
+                    "2026-09-23",
+                )
+
+            self.assertEqual(
+                [tuple(row) for row in daily],
+                [
+                    ("2026-09-21", "192.0.2.50", 2),
+                    ("2026-09-22", "192.0.2.50", 1),
+                ],
+            )
+            self.assertEqual(
+                sources,
+                [{"source_ip": "192.0.2.50", "detections": 3}],
+            )
+
     def test_router_reboot_resets_detection_cursor(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "report.sqlite3"
