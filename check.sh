@@ -110,7 +110,9 @@ if ((${#PYTHON_SCRIPTS[@]} > 0)); then
     PYTHONPYCACHEPREFIX="$PYTHON_CACHE_DIRECTORY"
     export PYTHONPYCACHEPREFIX
     "$PROJECT_PYTHON" -m py_compile "${PYTHON_SCRIPTS[@]}"
-    "$PROJECT_PYTHON" -m unittest discover -s mikrotik-report/tests -v
+    if [[ -d mikrotik-report/tests ]]; then
+        "$PROJECT_PYTHON" -m unittest discover -s mikrotik-report/tests -v
+    fi
     echo "Checking Python lint, formatting, and types..."
     "$PROJECT_PYTHON" -m ruff check .
     "$PROJECT_PYTHON" -m ruff format --check .

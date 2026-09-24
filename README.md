@@ -35,7 +35,7 @@ This repository contains Docker Compose setups, system configuration examples an
 | --- | --- |
 | `http-endpoint-monitor/` | HTTP endpoint monitoring and alerts |
 | `mail-notifier/` | Shared email notification helper |
-| `mikrotik-report/` | MikroTik blocking counter collector and weekly/monthly email reports |
+| `mikrotik-report/` | Docker Compose deployment for MikroTik blocking reports |
 | `pbc/` | Proxmox Backup Client scripts |
 | `ssh-client-setup/` | SSH client key provisioning and host configuration |
 | `shutdown-delayed/` | Delayed graphical shutdown helper |
