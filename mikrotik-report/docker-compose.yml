@@ -1,6 +1,6 @@
 services:
   mikrotik-report:
-    image: ${MIKROTIK_REPORT_IMAGE:-ghcr.io/raposo93/mikrotik-report:0.1.0}
+    image: ${MIKROTIK_REPORT_IMAGE:-ghcr.io/raposo93/mikrotik-report:0.1.2}
     restart: unless-stopped
     stop_grace_period: 1m
     env_file:
@@ -9,10 +9,6 @@ services:
       - type: volume
         source: report-data
         target: /var/lib/mikrotik-report
-      - type: bind
-        source: "${MIKROTIK_REPORT_NOTIFIER_HOST_PATH:?set an absolute notifier path}"
-        target: /usr/local/bin/send-mail
-        read_only: true
 
 volumes:
   report-data:

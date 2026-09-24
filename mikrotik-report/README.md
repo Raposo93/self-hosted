@@ -5,7 +5,7 @@ This directory contains only the Docker Compose deployment for
 application source, tests, image build, and release lifecycle belong to that
 standalone repository.
 
-The deployment pins the published `0.1.0` image. Image upgrades should be made
+The deployment pins the published `0.1.2` image. Image upgrades should be made
 explicitly in both `docker-compose.yml` and `.env.example` so they remain
 reviewable.
 
@@ -20,21 +20,22 @@ docker compose pull
 docker compose up -d
 ```
 
-`MIKROTIK_REPORT_NOTIFIER_HOST_PATH` must be an absolute host path to an
-executable compatible with the notifier interface documented upstream. The
-container mounts it read-only as `/usr/local/bin/send-mail`. The executable and
-everything it needs must work inside the container and be readable and
-executable by UID/GID `10001`. The image does not contain an SMTP client; the
-repository's host `mail-notifier/send-mail.sh` therefore cannot be mounted
-directly unless the image is extended with its `bash` and `msmtp` runtime
-requirements.
+Release `0.1.2` includes its own SMTP notifier. Configure `MIKROTIK_SMTP_HOST`
+and, when authentication is required, `MIKROTIK_SMTP_USER` plus either
+`MIKROTIK_SMTP_PASSWORD` or a mounted `MIKROTIK_SMTP_PASSWORD_FILE`. STARTTLS on
+port 587 is the default; use `MIKROTIK_SMTP_TLS=implicit` for direct TLS on port
+465. TLS certificate verification cannot be disabled.
+
+ASN enrichment is disabled by default. Enabling `MIKROTIK_ASN_ENABLED` permits
+outbound Team Cymru bulk WHOIS lookups in addition to RouterOS and SMTP access.
 
 The `report-data` named volume stores the SQLite database. Do not run the old
 systemd timers and this container against the same database. When migrating an
 existing `/var/lib/mikrotik-report/report.sqlite3`, stop the old timers first
 and copy the database into the Compose volume while preserving ownership for
 UID/GID `10001`. Keep the original database until the container has collected
-and reported successfully.
+and reported successfully. Upgrading from `0.1.0` to `0.1.2` does not require a
+database migration.
 
 View service status and logs with:
 
