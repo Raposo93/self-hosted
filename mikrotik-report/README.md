@@ -5,7 +5,7 @@ This directory contains only the Docker Compose deployment for
 application source, tests, image build, and release lifecycle belong to that
 standalone repository.
 
-The deployment pins the published `0.1.3` image. Image upgrades should be made
+The deployment pins the published `0.1.4` image. Image upgrades should be made
 explicitly in both `docker-compose.yml` and `.env.example` so they remain
 reviewable.
 
@@ -63,27 +63,31 @@ existing `/var/lib/mikrotik-report/report.sqlite3`, stop the old timers first
 and copy the database into the Compose volume while preserving ownership for
 UID/GID `10001`.
 
-## Upgrade to 0.1.3
+## Upgrade to 0.1.4
 
-Version `0.1.3` atomically migrates the SQLite schema from version 5 to 6 on its
-first writing command. Stop every collector and report process and copy the
-database out of the named volume before pulling the image:
+Stop every collector and report process and copy the database out of the named
+volume before pulling the image:
 
 ```bash
 docker compose stop mikrotik-report
 docker compose cp \
   mikrotik-report:/var/lib/mikrotik-report/report.sqlite3 \
-  ./report.sqlite3.v0.1.2
+  ./report.sqlite3.pre-v0.1.4
 docker compose pull
 docker compose up -d
 ```
 
-Keep that backup until collection and reporting have succeeded. Version `0.1.2`
-rejects the migrated schema; rollback requires stopping `0.1.3` and restoring
-the pre-upgrade database before starting the old image. Never downgrade
-SQLite's `user_version` manually. Existing independent source and destination
-totals remain available, but correlated per-source destination history begins
-only with events collected after the migration.
+Keep the backup until collection and reporting have succeeded. There is no
+configuration or schema change from `0.1.3`; SQLite `user_version` remains 6
+and rollback to `0.1.3` needs no database migration. Report output intentionally
+gains summaries, recurrence buckets, concentration, lookback, and
+ranking-movement sections.
+
+For an upgrade from `0.1.2` or earlier, the first writing command still performs
+the schema 5-to-6 migration introduced in `0.1.3`. Rolling back across that
+boundary requires stopping the new image and restoring the pre-upgrade database;
+never downgrade SQLite's `user_version` manually. Existing daily detection
+aggregates are reused, but missing historical events are not backfilled.
 
 View service status and logs with:
 
