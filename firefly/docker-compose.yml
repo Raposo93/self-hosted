@@ -1,6 +1,6 @@
 services:
   app:
-    image: fireflyiii/core:latest
+    image: fireflyiii/core:version-6.5.6
     hostname: app
     container_name: firefly
     restart: always

@@ -1,6 +1,6 @@
 services:
   jellyfin:
-    image: jellyfin/jellyfin:latest
+    image: jellyfin/jellyfin:10.11.6
     container_name: jellyfin
     user: "${PUID}:${PGID}"
     network_mode: bridge
