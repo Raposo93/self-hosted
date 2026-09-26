@@ -9,11 +9,10 @@ services:
       - PGID=${PGID}
       - PUID=${PUID}
       - QBT_LEGAL_NOTICE=${QBT_LEGAL_NOTICE}
-      - QBT_VERSION=${QBT_VERSION}
       - QBT_WEBUI_PORT=${QBT_WEBUI_PORT}
-      #- TZ=UTC
+      - TZ=${TZ}
       #- UMASK=022
-    image: qbittorrentofficial/qbittorrent-nox:${QBT_VERSION}
+    image: qbittorrentofficial/qbittorrent-nox:5.2.3-1
     ports:
       # for bittorrent traffic
       - ${QBT_TORRENT_PORT}:${QBT_TORRENT_PORT}/tcp
@@ -21,6 +20,7 @@ services:
       # for WebUI
       - ${QBT_WEBUI_PORT}:${QBT_WEBUI_PORT}/tcp
     #read_only: true
+    # Upstream recommends 30m to allow qBittorrent to shut down cleanly.
     stop_grace_period: 30m
     tmpfs:
       - /tmp
