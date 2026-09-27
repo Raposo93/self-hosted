@@ -1,0 +1,13 @@
+{
+  "hostname": "pve-dr-test",
+  "pbs_storage": "pbs-dr",
+  "target_storage": "local-lvm",
+  "temporary_id": 990000,
+  "mail_to": "operator@example.com",
+  "restore_timeout": 3600,
+  "poweroff": false,
+  "guests": [
+    {"kind": "vm", "source_id": 100, "name": "example-vm", "agent": true, "boot_timeout": 180},
+    {"kind": "ct", "source_id": 101, "name": "example-container", "boot_timeout": 120}
+  ]
+}

@@ -116,6 +116,9 @@ if ((${#PYTHON_SCRIPTS[@]} > 0)); then
     if [[ -d security-update-check/tests ]]; then
         "$PROJECT_PYTHON" -m unittest discover -s security-update-check/tests -v
     fi
+    if [[ -d proxmox-restore-check/tests ]]; then
+        "$PROJECT_PYTHON" -m unittest discover -s proxmox-restore-check/tests -v
+    fi
     echo "Checking Python lint, formatting, and types..."
     "$PROJECT_PYTHON" -m ruff check .
     "$PROJECT_PYTHON" -m ruff format --check .

@@ -1,0 +1,15 @@
+[Unit]
+Description=Restore and boot Proxmox guests on dedicated DR test node
+Wants=network-online.target
+After=network-online.target pve-cluster.service pvedaemon.service pve-guests.service
+ConditionPathExists=/etc/proxmox-restore-check.json
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/path/to/self-hosted/proxmox-restore-check
+ExecStart=/usr/bin/python3 /path/to/self-hosted/proxmox-restore-check/proxmox_restore_check.py --config /etc/proxmox-restore-check.json
+TimeoutStartSec=infinity
+
+[Install]
+WantedBy=multi-user.target
