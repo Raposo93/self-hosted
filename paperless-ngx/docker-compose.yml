@@ -1,12 +1,12 @@
 services:
   paperless-redis:
-    image: docker.io/library/redis:7
+    image: docker.io/library/redis:7.4.11
     restart: unless-stopped
     volumes:
       - redisdata:/data
 
   paperless-db:
-    image: docker.io/library/postgres:15
+    image: docker.io/library/postgres:15.19
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
@@ -30,7 +30,7 @@ services:
       PAPERLESS_DBUSER: ${POSTGRES_USER}
       PAPERLESS_DBPASS: ${POSTGRES_PASSWORD}
       PAPERLESS_TIME_ZONE: ${TZ}
-      PAPERLESS_OCR_LANGUAGES: ${OCR_LANGUAGES}
+      PAPERLESS_OCR_LANGUAGE: ${OCR_LANGUAGE}
       PAPERLESS_CONSUMPTION_DIR: /consume
       PAPERLESS_DATA_DIR: /usr/src/paperless/data
       PAPERLESS_MEDIA_ROOT: /usr/src/paperless/media
