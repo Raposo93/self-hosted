@@ -1,6 +1,6 @@
 services:
   grocy:
-    image: ghcr.io/linuxserver/grocy
+    image: ghcr.io/linuxserver/grocy:v4.7.1-ls341
     container_name: grocy
     environment:
       - PUID=${PUID}

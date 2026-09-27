@@ -29,7 +29,7 @@ services:
       - ${QBT_CONFIG_PATH}:/config
       - ${QBT_DOWNLOADS_PATH}:/downloads
   qbittorrent-log:
-    image: busybox:latest
+    image: busybox:1.38.0
     container_name: qbittorrent-log
     restart: unless-stopped
     depends_on:

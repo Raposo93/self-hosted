@@ -13,7 +13,7 @@ services:
       - firefly_iii
 
   db:
-    image: mariadb:lts
+    image: mariadb:12.3.3
     hostname: db
     container_name: firefly_iii_db
     restart: always
@@ -24,7 +24,7 @@ services:
       - firefly_iii
 
   cron:
-    image: alpine
+    image: alpine:3.24.2
     restart: always
     container_name: firefly_iii_cron
     command: sh -c "echo \"0 3 * * * wget -qO- http://app:8080/api/v1/cron/${STATIC_CRON_TOKEN}\" | crontab - && crond -f -L /dev/stdout"
