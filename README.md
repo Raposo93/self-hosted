@@ -56,39 +56,65 @@ Example:
 cp .env.example .env
 ```
 
+### Docker image versions
+
+Docker images should use explicit versions where practical instead of `latest`, implicit tags or other unnecessarily floating tags.
+
+Image updates are managed with Renovate. Renovate detects newer versions and proposes them through pull requests, but updates are reviewed manually before being merged.
+
+Merging an image update does not automatically deploy, restart or replace containers on the server.
+
+Major version changes for databases or other stateful services should be treated as migrations rather than routine image updates.
+
+### Docker Compose conventions
+
+Compose definitions should remain simple and service-specific rather than following a rigid common template.
+
+General conventions are:
+
+- use `restart: unless-stopped` unless a service has a reason to behave differently;
+- expose services intended to be reached only through HAProxy on `127.0.0.1`;
+- expose services to the LAN only when direct LAN access is intentional;
+- use environment variables for host-specific paths, ports and bind addresses where useful;
+- use read-only mounts when the container does not need write access;
+- avoid stale commented debugging options;
+- document unusual timeouts, compatibility settings or operational helper containers close to the relevant configuration;
+- preserve application-specific requirements instead of normalizing configuration only for consistency.
+
+Intentional exceptions should be understandable from the Compose file itself or its service documentation.
+
 ## Security notes
 
 Do not commit:
 
-* `.env` files
-* credentials
-* API tokens
-* private keys
-* generated certificates
-* database files
-* service runtime data
-* logs
+- `.env` files
+- credentials
+- API tokens
+- private keys
+- generated certificates
+- database files
+- service runtime data
+- logs
 
 This repository is intended to store deployment definitions and reusable scripts, not live private data.
 
 ## Usage
 
-Run local repository checks with `./check.sh`. It validates every Docker Compose
-definition with its committed `.env.example`, checks Git diffs, Bash and Python
-syntax, runs Python tests, Ruff lint and formatting, Pyright, and verifies
-systemd examples. Docker Compose, Bash, Git, Python, Ruff, and Pyright are
-required. Install the Python check dependencies with
-`python3 -m pip install -r requirements-check.txt` (or install them in `.venv`).
-It also runs `shellcheck` when installed. GitHub Actions runs the same command
-on pushes and pull requests, with `shellcheck` installed.
+Run local repository checks with `./check.sh`. It validates every Docker Compose definition with its committed `.env.example`, checks Git diffs, Bash and Python syntax, runs Python tests, Ruff lint and formatting, Pyright, and verifies systemd examples.
 
-The Compose check copies each definition and its `.env.example` files to a
-temporary directory, so it does not read private service `.env` files. It
-validates the repository examples and Compose model, not host-specific settings.
-HAProxy's complete configuration depends on live certificate and map paths, so
-validate the installed configuration separately before reloading it, as
-described in `haproxy/README.md`. The repository check does not contact
-production hosts.
+Docker Compose, Bash, Git, Python, Ruff, and Pyright are required. Install the Python check dependencies with:
+
+```bash
+python3 -m pip install -r requirements-check.txt
+```
+
+or install them in `.venv`.
+
+It also runs `shellcheck` when installed. GitHub Actions runs the same command on pushes and pull requests, with `shellcheck` installed.
+
+The Compose check copies each definition and its `.env.example` files to a temporary directory, so it does not read private service `.env` files. It validates the repository examples and Compose model, not host-specific settings.
+
+HAProxy's complete configuration depends on live certificate and map paths, so validate the installed configuration separately before reloading it, as described in `haproxy/README.md`. The repository check does not contact production hosts.
 
 Enter the directory of the service or tool you want to manage and review its files before running anything.
 
@@ -123,4 +149,6 @@ Adapt the values for the profile and keep `.env.*` files untracked.
 
 ## Notes
 
-Deployment-specific hostnames, addresses, credentials and topology belong in local configuration, not in the repository. The examples favor maintainability and recovery over production-framework complexity.
+Deployment-specific hostnames, addresses, credentials and topology belong in local configuration, not in the repository.
+
+The examples favor maintainability, explicit configuration and recovery over production-framework complexity.
