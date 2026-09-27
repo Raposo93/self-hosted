@@ -9,5 +9,5 @@ services:
     volumes:
       - ${GROCY_CONFIG_DIR}:/config
     ports:
-      - ${GROCY_PORT}:80
+      - "${GROCY_BIND}:${GROCY_PORT}:80"
     restart: unless-stopped

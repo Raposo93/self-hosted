@@ -23,8 +23,7 @@ services:
      DB_NAME: ${DB_NAME}
    restart: unless-stopped
    ports:
-     - "3001:3000"
-
+     - "${WIKIJS_BIND}:${WIKIJS_PORT}:3000"
 volumes:
  db-data:
    driver: local

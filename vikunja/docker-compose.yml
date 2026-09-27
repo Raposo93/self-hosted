@@ -34,7 +34,7 @@ services:
       VIKUNJA_MAILER_FROMEMAIL: $MAILFROM
       VIKUNJA_MAILER_FORCESSL: 0
     ports:
-      - 3456:3456
+      - "${VIKUNJA_BIND}:${VIKUNJA_PORT}:3456"
     volumes:
       - "${DATA_DIR}:/app/vikunja/files"
     depends_on:
