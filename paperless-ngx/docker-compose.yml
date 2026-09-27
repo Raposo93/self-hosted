@@ -35,10 +35,6 @@ services:
       PAPERLESS_DATA_DIR: /usr/src/paperless/data
       PAPERLESS_MEDIA_ROOT: /usr/src/paperless/media
       PAPERLESS_ENABLE_HTTP_REMOTE_USER: "false"
-      PAPERLESS_OCR_MAX_IMAGE_PIXELS: 1000000000
-      PAPERLESS_TASK_WORKERS: 1
-      PAPERLESS_CONSUMER_POLLING: 60  # escanea nuevos documentos cada 60s
-      PAPERLESS_CONSUMER_DELETE: "false"  # <<< NO BORRAR originales
     volumes:
       - ${PAPERLESS_CONSUME_DIR}:/consume
       - ${PAPERLESS_DATA_DIR}:/usr/src/paperless/data
