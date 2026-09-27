@@ -1,8 +1,5 @@
 services:
   qbittorrent-nox:
-    # for debugging
-    #cap_add:
-     #- SYS_PTRACE
     container_name: qbittorrent-nox
     restart: unless-stopped
     environment:
@@ -11,7 +8,6 @@ services:
       - QBT_LEGAL_NOTICE=${QBT_LEGAL_NOTICE}
       - QBT_WEBUI_PORT=${QBT_WEBUI_PORT}
       - TZ=${TZ}
-      #- UMASK=022
     image: qbittorrentofficial/qbittorrent-nox:5.2.3-1
     ports:
       # for bittorrent traffic
@@ -19,7 +15,6 @@ services:
       - ${QBT_TORRENT_PORT}:${QBT_TORRENT_PORT}/udp
       # for WebUI
       - ${QBT_WEBUI_PORT}:${QBT_WEBUI_PORT}/tcp
-    #read_only: true
     # Upstream recommends 30m to allow qBittorrent to shut down cleanly.
     stop_grace_period: 30m
     tmpfs:
