@@ -247,6 +247,10 @@ Profiles without `ENCRYPTION_KEYFILE` and without the encryption drop-in run une
 
 ## Encryption recovery
 
+For scheduled file restore verification, see
+[`pbc-restore-check/`](../pbc-restore-check/README.md). It restores and validates
+a sentinel from the latest snapshot using the same PBS credentials.
+
 Encrypted backups require the profile encryption key and its password to restore their contents.
 
 Keep an offline copy of the encryption key and password outside the machine being backed up. Do not keep the only recovery material on the protected machine.

@@ -1,0 +1,14 @@
+[Unit]
+Description=Verify PBS sentinel restore (%i)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/path/to/self-hosted/pbc-restore-check
+EnvironmentFile=/path/to/self-hosted/pbc-restore-check/.env.%i
+LoadCredentialEncrypted=proxmox-backup-client.password:/root/.config/proxmox-backup/%i-api-token.cred
+LoadCredentialEncrypted=proxmox-backup-client.fingerprint:/root/.config/proxmox-backup/%i-fingerprint.cred
+ExecStart=/bin/bash /path/to/self-hosted/pbc-restore-check/pbc_restore_check.sh
+TimeoutStartSec=2h
+UMask=0077

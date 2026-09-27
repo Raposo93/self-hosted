@@ -37,6 +37,7 @@ This repository contains Docker Compose setups, system configuration examples an
 | `mail-notifier/` | Shared email notification helper |
 | `mikrotik-report/` | Docker Compose deployment for MikroTik blocking reports |
 | `pbc/` | Proxmox Backup Client scripts |
+| `pbc-restore-check/` | Monthly PBS sentinel restore verification |
 | `proxmox-restore-check/` | Sequential offline VM/LXC restore and boot drills |
 | `security-update-check/` | Daily security update and reboot notifications |
 | `ssh-client-setup/` | SSH client key provisioning and host configuration |

@@ -1,0 +1,168 @@
+import importlib.util
+import json
+import os
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+SPEC = importlib.util.spec_from_file_location(
+    "pbc_restore_check", Path(__file__).resolve().parents[1] / "pbc_restore_check.py"
+)
+assert SPEC and SPEC.loader
+checker = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(checker)
+
+
+class RestoreTests(unittest.TestCase):
+    def test_latest_filters_group_and_sorts(self):
+        rows = [
+            {"backup-type": "host", "backup-id": "test", "backup-time": 100},
+            {"backup-type": "host", "backup-id": "other", "backup-time": 400},
+            {"backup-type": "host", "backup-id": "test", "backup-time": 200},
+        ]
+        self.assertEqual(
+            checker.latest_snapshot(json.dumps(rows), "host/test", 0, 300),
+            "host/test/1970-01-01T00:03:20Z",
+        )
+        with self.assertRaises(ValueError):
+            checker.latest_snapshot(json.dumps(rows), "host/test", 50, 300)
+        with self.assertRaises(ValueError):
+            checker.latest_snapshot("[]", "host/test", 0, 300)
+        with self.assertRaises(ValueError):
+            checker.latest_snapshot(json.dumps(rows), "host/test", 0, -200)
+
+    def exercise(self, mode):
+        with tempfile.TemporaryDirectory() as base:
+            environment = {
+                "REPO": "fake",
+                "RESTORE_GROUP": "host/test",
+                "BACKUP_NAME": "data.pxar",
+                "RESTORE_TMP_BASE": base,
+            }
+            calls = []
+
+            def fake_client(arguments):
+                calls.append(arguments)
+                if arguments[0] == "snapshot":
+                    return json.dumps(
+                        [
+                            {
+                                "backup-type": "host",
+                                "backup-id": "test",
+                                "backup-time": 100,
+                            }
+                        ]
+                    )
+                target = Path(arguments[3])
+                target.mkdir()
+                sentinel = target / ".pbc-restore-sentinel"
+                if mode == "restore-error":
+                    raise ValueError("Restore failed")
+                if mode == "interrupted":
+                    raise InterruptedError("Interrupted")
+                if mode == "symlink":
+                    sentinel.symlink_to("/etc/passwd")
+                elif mode != "missing":
+                    sentinel.write_text(
+                        "bad\n" if mode == "bad" else "pbc-restore-sentinel-v1\n"
+                    )
+                return ""
+
+            if mode == "checksum":
+                environment["SENTINEL_SHA256"] = "0" * 64
+            with (
+                patch.dict(os.environ, environment, clear=True),
+                patch.object(checker, "client", side_effect=fake_client),
+            ):
+                if mode == "ok":
+                    self.assertIn("host/test", checker.verify())
+                else:
+                    with self.assertRaises((ValueError, InterruptedError)):
+                        checker.verify()
+            self.assertEqual(list(Path(base).iterdir()), [])
+            self.assertIn("/.pbc-restore-sentinel", calls[1])
+
+    def test_restore_and_cleanup(self):
+        for mode in [
+            "ok",
+            "missing",
+            "bad",
+            "checksum",
+            "symlink",
+            "restore-error",
+            "interrupted",
+        ]:
+            with self.subTest(mode=mode):
+                self.exercise(mode)
+
+    def test_client_failure_and_timeout(self):
+        with patch.object(checker.subprocess, "run") as run:
+            run.return_value.returncode = 5
+            run.return_value.stderr = "private token"
+            with self.assertRaisesRegex(ValueError, "exit 5"):
+                checker.client(["restore"])
+            self.assertEqual(run.call_args.kwargs["stdin"], subprocess.DEVNULL)
+            run.side_effect = subprocess.TimeoutExpired("client", 1)
+            with self.assertRaises(subprocess.TimeoutExpired):
+                checker.client(["restore"])
+
+    def test_encryption_and_config_fail_before_client(self):
+        with tempfile.TemporaryDirectory() as base:
+            environment = {
+                "REPO": "fake",
+                "RESTORE_GROUP": "host/test",
+                "BACKUP_NAME": "data.pxar",
+                "RESTORE_TMP_BASE": base,
+                "ENCRYPTION_KEYFILE": base + "/key",
+            }
+            with (
+                patch.dict(os.environ, environment, clear=True),
+                patch.object(checker, "client") as client,
+            ):
+                with self.assertRaisesRegex(ValueError, "Incomplete encryption"):
+                    checker.verify()
+                client.assert_not_called()
+            for path in ["../sentinel", "*", "/sentinel", "nested/sentinel"]:
+                environment.pop("ENCRYPTION_KEYFILE", None)
+                environment["SENTINEL_PATH"] = path
+                with (
+                    patch.dict(os.environ, environment, clear=True),
+                    patch.object(checker, "client") as client,
+                ):
+                    with self.assertRaises(ValueError):
+                        checker.verify()
+                    client.assert_not_called()
+
+    def test_notification_status(self):
+        environment = {
+            "RESTORE_GROUP": "host/test",
+            "MSMTP_ACCOUNT": "default",
+            "SENDER_EMAIL": "sender@example.com",
+            "RECIPIENT_EMAIL": "to@example.com",
+        }
+        for failure in [False, True]:
+            for mail_status in [0, 1]:
+                with (
+                    self.subTest(failure=failure, mail_status=mail_status),
+                    patch.dict(os.environ, environment, clear=True),
+                    patch.object(checker, "verify") as verify,
+                    patch.object(checker.subprocess, "run") as send,
+                ):
+                    if failure:
+                        verify.side_effect = ValueError("secret must not appear")
+                    else:
+                        verify.return_value = "Restored"
+                    send.return_value.returncode = mail_status
+                    self.assertEqual(
+                        checker.main(), 1 if failure else (2 if mail_status else 0)
+                    )
+                    self.assertNotIn("secret", send.call_args.kwargs["input"])
+                    self.assertIn(
+                        "failed" if failure else "verified", send.call_args.args[0][-1]
+                    )
+
+
+if __name__ == "__main__":
+    unittest.main()
