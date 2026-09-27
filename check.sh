@@ -113,6 +113,9 @@ if ((${#PYTHON_SCRIPTS[@]} > 0)); then
     if [[ -d mikrotik-report/tests ]]; then
         "$PROJECT_PYTHON" -m unittest discover -s mikrotik-report/tests -v
     fi
+    if [[ -d security-update-check/tests ]]; then
+        "$PROJECT_PYTHON" -m unittest discover -s security-update-check/tests -v
+    fi
     echo "Checking Python lint, formatting, and types..."
     "$PROJECT_PYTHON" -m ruff check .
     "$PROJECT_PYTHON" -m ruff format --check .

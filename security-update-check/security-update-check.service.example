@@ -1,0 +1,12 @@
+[Unit]
+Description=Check pending security updates and reboot requirements
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/path/to/self-hosted/security-update-check
+EnvironmentFile=/path/to/self-hosted/security-update-check/.env
+ExecStart=/usr/bin/python3 /path/to/self-hosted/security-update-check/security_update_check.py
+TimeoutStartSec=20min
