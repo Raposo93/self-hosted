@@ -124,6 +124,7 @@ fi
 FAIL_LIMIT=3
 CONNECT_TIMEOUT=5
 MAX_TIME=15
+RETRY_INTERVAL=300
 
 SCRIPT_DIR="$(
     cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &&
@@ -141,6 +142,7 @@ fi
 LOG_FILE="${SCRIPT_DIR}/http-endpoint-monitor.log"
 STATE_DIR="${SCRIPT_DIR}/state"
 STATE_FILE="${STATE_DIR}/${NAME}.state"
+ALERT_FILE="${STATE_DIR}/${NAME}.alert"
 LOCK_FILE="${STATE_DIR}/${NAME}.lock"
 
 mkdir -p "$STATE_DIR"
@@ -170,19 +172,79 @@ send_alert() {
             --to "$ALERT_EMAIL" \
             --subject "$subject"
     then
-        log_message "WARNING failed to send email alert"
+        log_message "ERROR email alert delivery failed: ${pending_alert}"
+        return 1
+    fi
+
+    log_message "Email alert accepted by notifier: ${pending_alert}"
+}
+
+save_alert_state() {
+    local temporary
+    temporary="$(mktemp "${STATE_DIR}/.${NAME}.alert.XXXXXX")"
+    printf '%s|%s|%s\n' "$sent_alert" "$pending_alert" "$last_attempt" > "$temporary"
+    mv -- "$temporary" "$ALERT_FILE"
+}
+
+queue_alert() {
+    pending_alert="$1"
+    last_attempt=0
+    save_alert_state
+    log_message "Email alert pending: ${pending_alert}"
+}
+
+cancel_pending_alert() {
+    log_message "Discarded obsolete email alert: ${pending_alert}"
+    pending_alert="NONE"
+    last_attempt=0
+    save_alert_state
+}
+
+try_pending_alert() {
+    local message="$1"
+    local now
+    [[ "$pending_alert" != "NONE" ]] || return 0
+    now="$(date +%s)"
+    if (( last_attempt > 0 && now >= last_attempt &&
+          now - last_attempt < RETRY_INTERVAL )); then
+        log_message "Email alert pending; retry later: ${pending_alert}"
         return 0
     fi
+
+    last_attempt="$now"
+    save_alert_state
+    if send_alert "$message"; then
+        sent_alert="$pending_alert"
+        pending_alert="NONE"
+        last_attempt=0
+        save_alert_state
+        return 0
+    fi
+    return 1
 }
 
 previous_state="UNKNOWN"
 failure_count=0
+sent_alert="UNKNOWN"
+pending_alert="NONE"
+last_attempt=0
 
 if [[ -r "$STATE_FILE" ]]; then
     IFS='|' read -r previous_state failure_count < "$STATE_FILE"
 fi
 
 [[ "$failure_count" =~ ^[0-9]+$ ]] || failure_count=0
+
+if [[ -r "$ALERT_FILE" ]]; then
+    IFS='|' read -r sent_alert pending_alert last_attempt < "$ALERT_FILE"
+fi
+
+if [[ ! "$sent_alert" =~ ^(UNKNOWN|DOWN|UP)$ ||
+      ! "$pending_alert" =~ ^(NONE|DOWN|UP)$ ||
+      ! "$last_attempt" =~ ^[0-9]+$ ]]; then
+    echo "Error: Invalid alert state: $ALERT_FILE" >&2
+    exit 1
+fi
 
 error_file="$(mktemp)"
 
@@ -218,11 +280,20 @@ response_time="${result#*|}"
 if [[ "$curl_result" -eq 0 && "$http_code" =~ ^[23] ]]; then
     log_message "OK http=${http_code} tiempo=${response_time}s"
 
-    if [[ "$previous_state" == "DOWN" ]]; then
-        send_alert "RECUPERADO: ${NAME} responde de nuevo. HTTP ${http_code}, ${response_time}s."
+    if [[ "$pending_alert" == "DOWN" ]]; then
+        cancel_pending_alert
     fi
 
+    if [[ "$previous_state" == "DOWN" && "$sent_alert" == "DOWN" &&
+          "$pending_alert" != "UP" ]]; then
+        queue_alert UP
+    fi
     printf 'UP|0\n' > "$STATE_FILE"
+    if [[ "$pending_alert" == "UP" ]]; then
+        if ! try_pending_alert "RECUPERADO: ${NAME} responde de nuevo. HTTP ${http_code}, ${response_time}s."; then
+            exit 1
+        fi
+    fi
     exit 0
 fi
 
@@ -237,11 +308,19 @@ fi
 log_message "FALLO contador=${failure_count}/${FAIL_LIMIT} http=${http_code} curl=${curl_result} tiempo=${response_time}s${details}"
 
 if (( failure_count >= FAIL_LIMIT )); then
-    if [[ "$previous_state" != "DOWN" ]]; then
-        send_alert "CAÍDA: ${NAME} lleva ${failure_count} fallos. HTTP ${http_code}, curl=${curl_result}. ${curl_error}"
+    if [[ "$pending_alert" == "UP" ]]; then
+        cancel_pending_alert
     fi
 
+    if [[ "$sent_alert" != "DOWN" && "$pending_alert" != "DOWN" ]]; then
+        queue_alert DOWN
+    fi
     printf 'DOWN|%s\n' "$failure_count" > "$STATE_FILE"
+    if [[ "$pending_alert" == "DOWN" ]]; then
+        if ! try_pending_alert "CAÍDA: ${NAME} lleva ${failure_count} fallos. HTTP ${http_code}, curl=${curl_result}. ${curl_error}"; then
+            exit 1
+        fi
+    fi
 else
     printf '%s|%s\n' "$previous_state" "$failure_count" > "$STATE_FILE"
 fi
