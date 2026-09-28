@@ -55,8 +55,8 @@ The `issue` command:
 1. checks that the domain exists in `/etc/haproxy/maps/hosts.map`;
 2. runs `acme.sh --issue` using HTTP-01 with `/var/www/acme-challenges`;
 3. installs the full chain and private key;
-4. builds `/etc/haproxy/certs/acme/<domain>.pem`;
-5. sets the PEM permissions to `0600`;
+4. builds `/etc/haproxy/certs/acme/<domain>.pem` with permissions `0600`;
+5. validates the HAProxy configuration;
 6. reloads HAProxy.
 
 The usual workflow for publishing a new domain is:
@@ -77,9 +77,10 @@ sudo HOME=/path/to/acme-user-home \
 
 The `renew` command processes every domain found in the HAProxy host map.
 
-Domains whose certificates are not due for renewal are skipped.
+Domains whose certificates are not due for renewal and have no pending work are skipped.
 
-HAProxy is reloaded once after all successfully renewed certificates have been deployed.
+HAProxy is reloaded once after all successfully renewed or pending certificates have
+been deployed and the configuration has been validated.
 
 ## systemd
 
@@ -180,8 +181,10 @@ For the requested domain, the script:
 1. verifies that the domain exists in the HAProxy host map;
 2. runs `acme.sh --issue` using ECC certificates and HTTP-01;
 3. installs the full chain and private key;
-4. combines them into `/etc/haproxy/certs/acme/<domain>.pem`;
-5. sets the PEM permissions to `0600`;
+4. combines them into a temporary PEM with permissions `0600`, then atomically
+   replaces `/etc/haproxy/certs/acme/<domain>.pem`;
+5. validates the HAProxy configuration, restoring the previous PEM if validation
+   fails;
 6. reloads HAProxy.
 
 ### Renew flow
@@ -191,13 +194,38 @@ For each domain found in the map, the script:
 1. runs `acme.sh --renew` using ECC certificates;
 2. skips domains that are not due for renewal;
 3. installs the full chain and private key when a certificate is renewed;
-4. combines them into `/etc/haproxy/certs/acme/<domain>.pem`;
-5. sets the PEM permissions to `0600`;
-6. reloads HAProxy once if at least one certificate was renewed successfully.
+4. combines them into a temporary PEM with permissions `0600`, then atomically
+   replaces `/etc/haproxy/certs/acme/<domain>.pem`;
+5. validates the HAProxy configuration, restoring previous PEMs if validation
+   fails;
+6. reloads HAProxy once if any certificate was deployed or a reload is pending.
 
 If any operation fails, the script exits with a non-zero status.
 
 When executed through systemd, this causes the service to be reported as failed.
+
+## Pending work and recovery
+
+Pending work is recorded in `/etc/haproxy/certs/acme/.acme-haproxy-pending.json`.
+Each domain has a phase: `renew`, `deploy`, `validate`, or `reload`. The file is
+removed after all work succeeds. Hidden `.pem.previous` files hold previous PEMs
+until validation and reload succeed; hidden `.pem.new` markers identify initial
+issuance where there was no previous PEM. These files contain or refer to private
+keys and must remain outside Git and readable only by the service operator.
+
+If deployment or reload fails, inspect the journal and the pending file, fix the
+reported cause, then run the `renew` command again. It retries pending work even
+when `acme.sh` says a renewal is not due. A failed `issue` command may also be
+retried with `issue <domain>` if issuance itself did not succeed. A repeated
+failure keeps the service result non-zero and leaves the pending phase visible.
+Do not delete the pending file or previous PEM while investigating a failure.
+
+The script validates before each reload. On validation failure it restores the
+previous PEM, or removes a new unvalidated PEM. If restoration itself fails, the
+journal reports the error and the pending phase remains for investigation. A
+failed reload leaves the validated PEM in place and retries validation and
+reload on the next run. No reload occurs when nothing changed and no work is
+pending.
 
 ## Logs
 

@@ -122,6 +122,9 @@ if ((${#PYTHON_SCRIPTS[@]} > 0)); then
     if [[ -d pbc-restore-check/tests ]]; then
         "$PROJECT_PYTHON" -m unittest discover -s pbc-restore-check/tests -v
     fi
+    if [[ -d acme_haproxy/tests ]]; then
+        "$PROJECT_PYTHON" -m unittest discover -s acme_haproxy/tests -v
+    fi
     echo "Checking Python lint, formatting, and types..."
     "$PROJECT_PYTHON" -m ruff check .
     "$PROJECT_PYTHON" -m ruff format --check .
