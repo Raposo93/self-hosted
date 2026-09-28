@@ -5,7 +5,7 @@ This directory contains only the Docker Compose deployment for
 application source, tests, image build, and release lifecycle belong to that
 standalone repository.
 
-The deployment pins the published `0.1.4` image. Image upgrades should be made
+The deployment pins the published `0.1.5` image. Image upgrades should be made
 explicitly in both `docker-compose.yml` and `.env.example` so they remain
 reviewable.
 
@@ -63,25 +63,35 @@ existing `/var/lib/mikrotik-report/report.sqlite3`, stop the old timers first
 and copy the database into the Compose volume while preserving ownership for
 UID/GID `10001`.
 
-## Upgrade to 0.1.4
+## Upgrade to 0.1.5
 
 Stop every collector and report process and copy the database out of the named
-volume before pulling the image:
+volume before pulling the image. In the private `.env`, replace
+`MIKROTIK_WEEKLY_CHECK_INTERVAL_SECONDS` and
+`MIKROTIK_MONTHLY_CHECK_INTERVAL_SECONDS` with local calendar times:
+
+```text
+MIKROTIK_WEEKLY_CHECK_TIME=00:15
+MIKROTIK_MONTHLY_CHECK_TIME=00:30
+```
+
+Both use `HH:MM` in `MIKROTIK_REPORT_TIMEZONE`. Then deploy the new image:
 
 ```bash
 docker compose stop mikrotik-report
 docker compose cp \
   mikrotik-report:/var/lib/mikrotik-report/report.sqlite3 \
-  ./report.sqlite3.pre-v0.1.4
+  ./report.sqlite3.pre-v0.1.5
 docker compose pull
 docker compose up -d
 ```
 
 Keep the backup until collection and reporting have succeeded. There is no
-configuration or schema change from `0.1.3`; SQLite `user_version` remains 6
-and rollback to `0.1.3` needs no database migration. Report output intentionally
-gains summaries, recurrence buckets, concentration, lookback, and
-ranking-movement sections.
+RouterOS or schema change from `0.1.4`; SQLite `user_version` remains 6 and
+rollback needs no database restore. A rollback to `0.1.4` does require restoring
+the old interval variables if their previous values matter. Version `0.1.5`
+checks pending report queues immediately at startup and then at the configured
+local times without shifting later checks after downtime.
 
 For an upgrade from `0.1.2` or earlier, the first writing command still performs
 the schema 5-to-6 migration introduced in `0.1.3`. Rolling back across that
