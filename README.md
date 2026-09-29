@@ -13,6 +13,7 @@ This repository contains Docker Compose setups, system configuration examples an
 | `filebrowser/` | File Browser deployment |
 | `firefly/` | Firefly III deployment |
 | `grocy/` | Grocy deployment |
+| `immich/` | Immich deployment |
 | `jellyfin/` | Jellyfin deployment |
 | `navidrome/` | Navidrome deployment |
 | `paperless-ngx/` | Paperless-ngx deployment |

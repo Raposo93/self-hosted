@@ -21,6 +21,8 @@ mikrotik-report/state/
 mikrotik-report/*.sqlite*
 jellyfin/cache/
 jellyfin/config/
+immich/library/
+immich/postgres/
 navidrome/data/
 paperless-ngx/data/
 paperless-ngx/db/
