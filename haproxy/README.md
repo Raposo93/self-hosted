@@ -225,3 +225,13 @@ validation and reload succeed, the challenge URL is public, and the renewal
 service and timer work. Destroy the test host afterwards. Use a fresh ACME
 home with the production CA for a real deployment; do not carry staging
 certificates into production.
+
+### Verification record (2026-09-30)
+
+* `./check.sh` passed, including the ACME helper tests and systemd unit verification.
+* The challenge unit separately passed `systemd-analyze verify`.
+* A public HTTP-01 challenge, staging issuance, and the HTTPS transition have
+  **not** been exercised on a disposable host. The validation machine has no
+  HAProxy binary or usable Docker daemon, and no public test hostname was
+  configured. Complete the disposable-host run above before treating the
+  bootstrap path as end-to-end verified.
