@@ -111,7 +111,7 @@ python3 -m pip install -r requirements-check.txt
 
 or install them in `.venv`.
 
-It also runs `shellcheck` when installed. GitHub Actions runs the same command on pushes and pull requests, with `shellcheck` installed.
+It also runs `shellcheck` when installed. GitHub Actions runs the same command on pushes and pull requests, with `shellcheck` installed, and checks whitespace in the commits being built.
 
 The Compose check copies each definition and its `.env.example` files to a temporary directory, so it does not read private service `.env` files. It validates the repository examples and Compose model, not host-specific settings.
 

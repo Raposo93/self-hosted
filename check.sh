@@ -43,6 +43,18 @@ trap cleanup EXIT
 echo "Checking Git changes and conflict markers..."
 git --no-pager diff --check
 git --no-pager diff --cached --check
+if [[ -n "${CHECK_DIFF_BASE:-}" ]]; then
+    diff_base="$CHECK_DIFF_BASE"
+    if [[ "$diff_base" =~ ^0+$ ]]; then
+        default_ref="refs/remotes/origin/${CHECK_DEFAULT_BRANCH:-}"
+        if [[ -n "${CHECK_DEFAULT_BRANCH:-}" ]] && git show-ref --verify --quiet "$default_ref"; then
+            diff_base="$(git merge-base HEAD "$default_ref")"
+        else
+            diff_base="$(git hash-object -t tree /dev/null)"
+        fi
+    fi
+    git --no-pager diff --check "$diff_base" HEAD
+fi
 if git --no-pager grep -nE '^(<<<<<<< .+|=======|>>>>>>> .+)$'; then
     echo "Error: unresolved merge conflict markers found." >&2
     exit 1
