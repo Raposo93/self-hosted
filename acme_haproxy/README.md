@@ -4,13 +4,19 @@ Helper script for issuing and renewing ECC certificates with `acme.sh`,
 installing them for HAProxy, rebuilding PEM files, and reloading HAProxy
 when certificates are deployed.
 
+For a fresh Debian/Ubuntu installation with no certificates, follow the
+[HAProxy bootstrap guide](../haproxy/README.md) first. It provides the
+HTTP-only configuration, challenge server, `acme.sh` installation, first
+certificate, HTTPS transition, and rollback. This page describes the helper
+and the renewal units used by that guide.
+
 ## Requirements
 
 * Python 3
 * `acme.sh`
 * HAProxy
 * systemd
-* HTTP-01 webroot at `/var/www/acme-challenges`
+* Running HTTP-01 challenge server and webroot at `/var/www/acme-challenges`
 * Permission to read `/etc/haproxy/maps/hosts.map`
 * Permission to write ACME challenge files under `/var/www/acme-challenges`
 * Permission to write certificates under `/etc/haproxy/certs/acme`
@@ -59,6 +65,11 @@ The `issue` command:
 5. validates the HAProxy configuration;
 6. reloads HAProxy.
 
+On the first issue, the active HAProxy configuration must be the HTTP-only
+bootstrap example. Its challenge backend remains available while the helper
+validates and reloads. After issue succeeds, install the HTTPS configuration
+as described in the [bootstrap guide](../haproxy/README.md#5-activate-https).
+
 The usual workflow for publishing a new domain is:
 
 1. configure the HAProxy backend;
@@ -90,10 +101,10 @@ Certificate issuance with `issue` remains an explicit operation when publishing 
 
 ### Install the service
 
-Copy the service template:
+From the repository root, copy the service template:
 
 ```bash
-sudo cp acme-haproxy.service.example \
+sudo cp acme_haproxy/acme-haproxy.service.example \
   /etc/systemd/system/acme-haproxy.service
 ```
 
@@ -104,7 +115,9 @@ Edit the installed service and replace:
 /path/to/acme-user-home
 ```
 
-with the actual paths.
+with the actual paths. Use `/var/lib/acme-haproxy` for `HOME` when following
+the bootstrap guide. The unit runs as root because it writes private keys and
+PEMs and reloads HAProxy.
 
 The `HOME` value must point to the home directory containing the `acme.sh` installation.
 
@@ -140,7 +153,7 @@ journalctl -u acme-haproxy.service
 Copy the timer template:
 
 ```bash
-sudo cp acme-haproxy.timer.example \
+sudo cp acme_haproxy/acme-haproxy.timer.example \
   /etc/systemd/system/acme-haproxy.timer
 ```
 
@@ -160,9 +173,15 @@ Check the next scheduled execution:
 
 ```bash
 systemctl list-timers acme-haproxy.timer
+systemctl is-enabled acme-haproxy.timer
+systemctl is-active acme-haproxy.timer
 ```
 
 The example timer runs once per day and uses `Persistent=true`, so a missed execution is triggered after the system becomes available again.
+The `acme.sh` installer must use `--no-cron`, as in the bootstrap guide.
+On an existing installation, check `sudo crontab -l` and other ACME timers
+for duplicate renewal schedules before enabling this timer. Keep a single
+scheduler for these certificates; `acme-haproxy.timer` owns renewal here.
 
 ## How it works
 

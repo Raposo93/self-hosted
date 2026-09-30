@@ -1,0 +1,18 @@
+[Unit]
+Description=Serve local HTTP-01 challenge files for HAProxy
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/acme-challenges
+ExecStart=/usr/bin/python3 -m http.server 8888 --bind 127.0.0.1 --directory /var/www/acme-challenges
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

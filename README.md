@@ -28,7 +28,7 @@ This repository contains Docker Compose setups, system configuration examples an
 | `haproxy/` | Standard HAProxy configuration, host map and HTTP-01 integration |
 | `acme_haproxy/` | ACME certificate issuance, renewal and deployment for HAProxy |
 
-`haproxy/` and `acme_haproxy/` are designed to work together. The HAProxy host map is the source of truth for published domains and ACME certificate management.
+`haproxy/` and `acme_haproxy/` are designed to work together. The HAProxy host map is the source of truth for published domains and ACME certificate management. For a new Debian/Ubuntu installation starting with no certificates, follow the [HAProxy bootstrap guide](haproxy/README.md).
 
 ### Utilities
 
