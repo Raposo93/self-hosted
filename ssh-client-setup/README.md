@@ -16,7 +16,8 @@ change server SSH policy.
 * updates only blocks previously created by this script;
 * refuses to overwrite an existing unmanaged block for the same alias;
 * applies mode `600` to the private key and SSH config, and `644` to the public key;
-* validates the resulting client configuration with `ssh -G`.
+* validates a temporary candidate with `ssh -G -F`, including the effective
+  hostname, user, and identity, before atomically replacing the config.
 
 ## Requirements
 
@@ -29,6 +30,8 @@ The workstation must provide:
 * `awk`
 * `grep`
 * `mktemp`
+* `cmp`
+* `mv`
 
 The remote SSH service is expected to use the default port `22`.
 
@@ -84,6 +87,17 @@ For example, this can update the IP address after a host moves.
 
 If an exact `Host <alias>` entry already exists but was not created by this
 script, execution stops so manual SSH configuration is not silently replaced.
+The same applies to a manual `Host` entry listing the alias alongside other
+names. Earlier wildcard `Host` rules, `Match` rules, and `Include` files can
+also affect the effective settings. The script checks OpenSSH's resolved values
+and stops if the requested hostname, user, or key would not take effect. Resolve
+the conflict manually; the script does not edit unrelated rules or inclusions.
+On any preparation or validation failure, the previous config remains intact.
+The final config has mode `0600`.
+
+Hostnames and IP addresses are limited to letters, digits, dots, underscores,
+colons, and hyphens. Aliases and users cannot start with a hyphen. Other SSH
+configuration syntax is rejected as input rather than inserted into the file.
 
 ## Interactive prompts
 

@@ -22,22 +22,22 @@ host_alias=$1
 remote_user=$2
 remote_host=$3
 
-if [[ ! "$host_alias" =~ ^[A-Za-z0-9._-]+$ ]]; then
+if [[ ! "$host_alias" =~ ^[A-Za-z0-9._]+[A-Za-z0-9._-]*$ ]]; then
     echo "Error: alias may only contain letters, numbers, dots, underscores, and hyphens." >&2
     exit 2
 fi
 
-if [[ ! "$remote_user" =~ ^[A-Za-z0-9._-]+$ ]]; then
+if [[ ! "$remote_user" =~ ^[A-Za-z0-9._]+[A-Za-z0-9._-]*$ ]]; then
     echo "Error: user may only contain letters, numbers, dots, underscores, and hyphens." >&2
     exit 2
 fi
 
-if [[ -z "$remote_host" || "$remote_host" =~ [[:space:]] ]]; then
-    echo "Error: host or IP must not be empty or contain whitespace." >&2
+if [[ ! "$remote_host" =~ ^[A-Za-z0-9._:]+[A-Za-z0-9._:-]*$ ]]; then
+    echo "Error: host or IP may only contain letters, numbers, dots, underscores, colons, and hyphens, and must not start with a hyphen." >&2
     exit 2
 fi
 
-for command in ssh ssh-keygen ssh-copy-id awk grep mktemp; do
+for command in ssh ssh-keygen ssh-copy-id awk grep mktemp cmp mv; do
     if ! command -v "$command" >/dev/null 2>&1; then
         echo "Error: required command not found: $command" >&2
         exit 1
@@ -54,34 +54,92 @@ end_marker="# END self-hosted ssh-client-setup: ${host_alias}"
 
 mkdir -p "$ssh_dir"
 chmod 700 "$ssh_dir"
-touch "$ssh_config"
-chmod 600 "$ssh_config"
 
-has_begin=false
-has_end=false
+if [[ -e "$ssh_config" && ! -f "$ssh_config" || -L "$ssh_config" ]]; then
+    echo "Error: $ssh_config must be a regular file, not a symlink." >&2
+    exit 1
+fi
 
-grep -Fqx "$begin_marker" "$ssh_config" && has_begin=true
-grep -Fqx "$end_marker" "$ssh_config" && has_end=true
+if [[ "$config_key_file" == *'"'* || "$config_key_file" == *'\'* || "$config_key_file" == *'%'* || "$config_key_file" == *$'\n'* ]]; then
+    echo "Error: home directory path cannot be represented safely in SSH config." >&2
+    exit 1
+fi
 
-if [[ "$has_begin" != "$has_end" ]]; then
-    echo "Error: incomplete managed block found for '$host_alias' in $ssh_config." >&2
+original_config=$(mktemp "${ssh_config}.original.XXXXXX")
+tmp_config=$(mktemp "${ssh_config}.candidate.XXXXXX")
+trap 'rm -f -- "$original_config" "$tmp_config"' EXIT
+
+config_existed=false
+if [[ -f "$ssh_config" ]]; then
+    config_existed=true
+    cat "$ssh_config" > "$original_config"
+fi
+
+begin_count=$(grep -Fxc "$begin_marker" "$original_config" || true)
+end_count=$(grep -Fxc "$end_marker" "$original_config" || true)
+
+if (( begin_count > 1 || end_count > 1 || begin_count != end_count )); then
+    echo "Error: incomplete or duplicate managed block found for '$host_alias' in $ssh_config." >&2
+    exit 1
+fi
+
+if ! awk -v begin="$begin_marker" -v end="$end_marker" '
+    $0 == begin { if (skip) exit 1; skip = 1; next }
+    $0 == end { if (!skip) exit 1; skip = 0; next }
+    !skip { lines[++count] = $0 }
+    END {
+        if (skip) exit 1
+        while (count > 0 && lines[count] == "") count--
+        for (i = 1; i <= count; i++) print lines[i]
+    }
+' "$original_config" > "$tmp_config"; then
+    echo "Error: malformed managed block in $ssh_config." >&2
     exit 1
 fi
 
 host_count=$(awk -v alias="$host_alias" '
-    tolower($1) == "host" && NF == 2 && $2 == alias { count++ }
+    tolower($1) == "host" {
+        for (i = 2; i <= NF; i++) if ($i == alias) count++
+    }
     END { print count + 0 }
-' "$ssh_config")
+' "$tmp_config")
 
-if [[ "$has_begin" == false && "$host_count" -gt 0 ]]; then
+if [[ "$host_count" -gt 0 ]]; then
     echo "Error: an unmanaged Host '$host_alias' entry already exists in $ssh_config." >&2
     echo "Refusing to overwrite it." >&2
     exit 1
 fi
 
-if [[ "$has_begin" == true && "$host_count" -ne 1 ]]; then
-    echo "Error: multiple Host '$host_alias' entries exist in $ssh_config." >&2
-    echo "Resolve the duplicate entries before running this script again." >&2
+if [[ -s "$tmp_config" ]]; then
+    printf '\n' >> "$tmp_config"
+fi
+cat >> "$tmp_config" <<EOF_CONFIG
+$begin_marker
+Host $host_alias
+    HostName $remote_host
+    User $remote_user
+    IdentityFile "$config_key_file"
+$end_marker
+EOF_CONFIG
+chmod 600 "$tmp_config"
+
+if ! effective_config=$(ssh -G -F "$tmp_config" -- "$host_alias"); then
+    echo "Error: candidate SSH configuration is invalid; $ssh_config was not changed." >&2
+    exit 1
+fi
+
+if ! printf '%s\n' "$effective_config" | awk -v host="$remote_host" -v user="$remote_user" -v identity="$config_key_file" '
+    $1 == "hostname" { actual_host = substr($0, length($1) + 2) }
+    $1 == "user" { actual_user = substr($0, length($1) + 2) }
+    $1 == "identityfile" && substr($0, length($1) + 2) == identity { found_identity = 1 }
+    END {
+        if (actual_host != host || actual_user != user || !found_identity) {
+            printf "Error: effective SSH settings conflict with requested host/user/identity (hostname=%s, user=%s, identity present=%s).\n", actual_host, actual_user, found_identity ? "yes" : "no" > "/dev/stderr"
+            exit 1
+        }
+    }
+'; then
+    echo "Resolve earlier Host, Match, or Include rules manually; $ssh_config was not changed." >&2
     exit 1
 fi
 
@@ -104,48 +162,17 @@ chmod 644 "$public_key_file"
 echo "Copying public key to ${remote_user}@${remote_host}"
 ssh-copy-id -i "$public_key_file" "${remote_user}@${remote_host}"
 
-tmp_config=$(mktemp "${ssh_config}.XXXXXX")
-trap 'rm -f "$tmp_config"' EXIT
-
-if [[ "$has_begin" == true ]]; then
-    awk -v begin="$begin_marker" -v end="$end_marker" '
-        $0 == begin { skip = 1; next }
-        $0 == end { skip = 0; next }
-        !skip { lines[++n] = $0 }
-        END {
-            while (n > 0 && lines[n] == "") {
-                n--
-            }
-            for (i = 1; i <= n; i++) {
-                print lines[i]
-            }
-        }
-    ' "$ssh_config" > "$tmp_config"
-else
-    cat "$ssh_config" > "$tmp_config"
+if [[ "$config_existed" == true ]]; then
+    if [[ ! -f "$ssh_config" || -L "$ssh_config" ]] || ! cmp -s -- "$original_config" "$ssh_config"; then
+        echo "Error: $ssh_config changed during setup; refusing to replace it." >&2
+        exit 1
+    fi
+elif [[ -e "$ssh_config" || -L "$ssh_config" ]]; then
+    echo "Error: $ssh_config appeared during setup; refusing to replace it." >&2
+    exit 1
 fi
 
-{
-    if [[ -s "$tmp_config" ]]; then
-        cat "$tmp_config"
-        printf '\n'
-    fi
-
-    cat <<EOF_CONFIG
-$begin_marker
-Host $host_alias
-    HostName $remote_host
-    User $remote_user
-    IdentityFile $config_key_file
-$end_marker
-EOF_CONFIG
-} > "$ssh_config"
-
-chmod 600 "$ssh_config"
-ssh -G "$host_alias" >/dev/null
-
-rm -f "$tmp_config"
-trap - EXIT
+mv -- "$tmp_config" "$ssh_config"
 
 echo "SSH host '$host_alias' configured successfully."
 echo "Test it with: ssh $host_alias"

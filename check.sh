@@ -131,6 +131,9 @@ if ((${#PYTHON_SCRIPTS[@]} > 0)); then
     if [[ -d http-endpoint-monitor/tests ]]; then
         "$PROJECT_PYTHON" -m unittest discover -s http-endpoint-monitor/tests -v
     fi
+    if [[ -d ssh-client-setup/tests ]]; then
+        "$PROJECT_PYTHON" -m unittest discover -s ssh-client-setup/tests -v
+    fi
     echo "Checking Python lint, formatting, and types..."
     "$PROJECT_PYTHON" -m ruff check .
     "$PROJECT_PYTHON" -m ruff format --check .
