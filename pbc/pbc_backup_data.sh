@@ -40,6 +40,69 @@ if [[ ! -d "$SOURCE_DIR" ]]; then
     exit 1
 fi
 
+SOURCE_REAL="$(realpath -e -- "$SOURCE_DIR")"
+if [[ ${EXPECTED_MOUNT+x} ]]; then
+    if [[ -z "$EXPECTED_MOUNT" || ! -d "$EXPECTED_MOUNT" ]]; then
+        echo "Error: EXPECTED_MOUNT must name an existing directory" >&2
+        exit 1
+    fi
+    MOUNT_REAL="$(realpath -e -- "$EXPECTED_MOUNT")"
+    if [[ "$SOURCE_REAL" != "$MOUNT_REAL" && "$SOURCE_REAL" != "${MOUNT_REAL%/}/"* ]]; then
+        echo "Error: SOURCE_DIR is outside EXPECTED_MOUNT: $EXPECTED_MOUNT" >&2
+        exit 1
+    fi
+    if ! ACTUAL_MOUNT="$(findmnt --target "$SOURCE_REAL" --noheadings --output TARGET)"; then
+        echo "Error: Cannot determine the mount containing SOURCE_DIR" >&2
+        exit 1
+    fi
+    if [[ "$ACTUAL_MOUNT" != "$MOUNT_REAL" ]]; then
+        echo "Error: Expected mount $MOUNT_REAL is absent from SOURCE_DIR (found $ACTUAL_MOUNT)" >&2
+        exit 1
+    fi
+    if [[ ${EXPECTED_MOUNT_SOURCE+x} ]]; then
+        if [[ -z "$EXPECTED_MOUNT_SOURCE" ]]; then
+            echo "Error: EXPECTED_MOUNT_SOURCE must not be empty" >&2
+            exit 1
+        fi
+        if ! ACTUAL_SOURCE="$(findmnt --target "$SOURCE_REAL" --noheadings --output SOURCE)"; then
+            echo "Error: Cannot determine the mount source for SOURCE_DIR" >&2
+            exit 1
+        fi
+        if [[ "$ACTUAL_SOURCE" != "$EXPECTED_MOUNT_SOURCE" ]]; then
+            echo "Error: Unexpected mount source for $MOUNT_REAL: $ACTUAL_SOURCE" >&2
+            exit 1
+        fi
+    fi
+elif [[ ${EXPECTED_MOUNT_SOURCE+x} ]]; then
+    echo "Error: EXPECTED_MOUNT_SOURCE requires EXPECTED_MOUNT" >&2
+    exit 1
+fi
+
+INCLUDE_DEV_ARGS=()
+if [[ -n "${INCLUDE_DEV_MOUNTS:-}" ]]; then
+    if [[ "$INCLUDE_DEV_MOUNTS" == '|'* || "$INCLUDE_DEV_MOUNTS" == *'|' || "$INCLUDE_DEV_MOUNTS" == *'||'* ]]; then
+        echo "Error: INCLUDE_DEV_MOUNTS contains an empty entry" >&2
+        exit 1
+    fi
+    IFS='|' read -r -a INCLUDE_MOUNTS <<< "$INCLUDE_DEV_MOUNTS"
+    for included in "${INCLUDE_MOUNTS[@]}"; do
+        if [[ "$included" != /* || ! -d "$included" ]]; then
+            echo "Error: INCLUDE_DEV_MOUNTS entries must be existing absolute directories: $included" >&2
+            exit 1
+        fi
+        included_real="$(realpath -e -- "$included")"
+        if [[ "$included_real" != "$SOURCE_REAL/"* ]]; then
+            echo "Error: INCLUDE_DEV_MOUNTS entry is outside SOURCE_DIR: $included" >&2
+            exit 1
+        fi
+        if ! included_mount="$(findmnt --mountpoint "$included_real" --noheadings --output TARGET)" || [[ "$included_mount" != "$included_real" ]]; then
+            echo "Error: INCLUDE_DEV_MOUNTS entry is not mounted: $included" >&2
+            exit 1
+        fi
+        INCLUDE_DEV_ARGS+=(--include-dev "$included_real")
+    done
+fi
+
 mkdir -p "$(dirname -- "$LOGFILE")"
 : > "$LOGFILE"
 
@@ -88,6 +151,7 @@ proxmox-backup-client backup "$BACKUP_NAME:$SOURCE_DIR" \
     --repository "$REPO" \
     "${BACKUP_ID_ARGS[@]}" \
     "${ENCRYPTION_ARGS[@]}" \
+    "${INCLUDE_DEV_ARGS[@]}" \
     --change-detection-mode metadata \
     --skip-e2big-xattr \
     >> "$LOGFILE" 2>&1

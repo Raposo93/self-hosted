@@ -18,6 +18,7 @@ Each backup profile uses its own environment file and can be scheduled with a sy
 ## Requirements
 
 * Proxmox Backup Client
+* `realpath` (coreutils); `findmnt` (util-linux) when mount checks or included mounts are configured
 * Access to a Proxmox Backup Server datastore
 * PBS user or API token with backup permissions
 * `systemd-creds`
@@ -55,6 +56,46 @@ letters, digits, `_`, `.` and `-`. An explicitly empty or invalid ID fails
 before the client runs. If `BACKUP_ID` is omitted, the script passes no
 `--backup-id` option and PBC continues to use its default hostname. Omission
 does **not** isolate profiles from each other.
+
+### Mounted sources and included mounts
+
+For a disk or network share, set `EXPECTED_MOUNT` to the mount point containing
+`SOURCE_DIR`. The source may be a directory below it. The script resolves both
+paths and checks that `findmnt -T SOURCE_DIR` reports that exact mount point;
+a leftover local directory under an unmounted disk or share fails before the
+client starts. Leave it unset for an ordinary local directory. To also verify
+the mounted filesystem, set `EXPECTED_MOUNT_SOURCE` to the exact `SOURCE` value
+shown by `findmnt -T /path/to/data -n -o SOURCE` on the intended mount. For an
+NFS share, this is typically `server:/export`; for a local disk, device names
+may change, so confirm the stable value on the host. A source identity setting
+requires `EXPECTED_MOUNT`.
+
+Proxmox Backup Client skips other mount points inside `SOURCE_DIR` by default.
+Set `INCLUDE_DEV_MOUNTS` to a `|` separated list of absolute mount paths below
+`SOURCE_DIR` to include only those mounts. Each path must be mounted when the
+backup starts; spaces in paths are supported, but `|` is reserved as the
+separator. The script passes each path as a separate `--include-dev` argument.
+For example:
+
+```bash
+EXPECTED_MOUNT="/mnt/archive"
+EXPECTED_MOUNT_SOURCE="nas:/archive"
+SOURCE_DIR="/mnt/archive/data"
+INCLUDE_DEV_MOUNTS="/mnt/archive/data/photos|/mnt/archive/data/media"
+```
+
+For profiles with mount dependencies, add a profile-specific systemd drop-in
+such as `/etc/systemd/system/pbc-backup@<profile>.service.d/mount.conf`:
+
+```ini
+[Unit]
+RequiresMountsFor=/mnt/archive
+```
+
+Use `Requires=` and `After=` for a specific network mount unit if systemd does
+not manage that mount through the local mount table. Reload systemd after adding
+the drop-in. The script still performs its own check so a missing or wrong
+mount cannot start a backup if the unit dependency is ineffective.
 
 ### Transition for existing profiles
 
@@ -217,7 +258,8 @@ systemctl list-timers 'pbc-backup*'
 The script:
 
 * validates the profile variables, including any explicit `BACKUP_ID`
-* checks that `SOURCE_DIR` exists
+* checks that `SOURCE_DIR` exists and, when configured, verifies its mount and source
+* includes only the internal mounts named by `INCLUDE_DEV_MOUNTS`
 * uses PBS credentials loaded by the systemd service
 * runs `proxmox-backup-client backup`
 * writes the configured log file
