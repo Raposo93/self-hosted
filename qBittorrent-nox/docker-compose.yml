@@ -8,7 +8,7 @@ services:
       - QBT_LEGAL_NOTICE=${QBT_LEGAL_NOTICE}
       - QBT_WEBUI_PORT=${QBT_WEBUI_PORT}
       - TZ=${TZ}
-    image: qbittorrentofficial/qbittorrent-nox:5.2.3-1
+    image: qbittorrentofficial/qbittorrent-nox:5.2.4-1
     ports:
       # for bittorrent traffic
       - ${QBT_TORRENT_PORT}:${QBT_TORRENT_PORT}/tcp
