@@ -143,6 +143,9 @@ if ((${#PYTHON_SCRIPTS[@]} > 0)); then
     if [[ -d http-endpoint-monitor/tests ]]; then
         "$PROJECT_PYTHON" -m unittest discover -s http-endpoint-monitor/tests -v
     fi
+    if [[ -d spaceship-ddns/tests ]]; then
+        "$PROJECT_PYTHON" -m unittest discover -s spaceship-ddns/tests -v
+    fi
     if [[ -d ssh-client-setup/tests ]]; then
         "$PROJECT_PYTHON" -m unittest discover -s ssh-client-setup/tests -v
     fi

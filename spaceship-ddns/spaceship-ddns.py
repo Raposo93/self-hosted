@@ -114,7 +114,7 @@ def _get_dns_records(
     return cast("list[dict[str, object]]", items)
 
 
-def _add_a_record(
+def _save_a_record(
     headers: Mapping[str, str],
     domain: str,
     record_name: str,
@@ -208,17 +208,22 @@ def main() -> int:
         ", ".join(addresses) if addresses else "none",
     )
 
-    current_exists = public_ip in addresses
+    current_records = [
+        record for record in a_records if record.get("address") == public_ip
+    ]
+    current_exists = bool(current_records)
+    ttl_changed = any(record.get("ttl") != ttl for record in current_records)
 
-    if not current_exists:
+    if not current_exists or ttl_changed:
         logger.info(
-            "Adding A record %s (%s) -> %s",
+            "Saving A record %s (%s) -> %s with TTL %s",
             record_name,
             domain,
             public_ip,
+            ttl,
         )
 
-        _add_a_record(
+        _save_a_record(
             headers,
             domain,
             record_name,
@@ -226,7 +231,7 @@ def main() -> int:
             ttl,
         )
 
-        logger.info("Added current IP successfully")
+        logger.info("Saved current A record successfully")
 
     obsolete_addresses = [address for address in addresses if address != public_ip]
 
@@ -243,7 +248,7 @@ def main() -> int:
         )
         logger.info("Removed obsolete IPs successfully")
 
-    if current_exists and not obsolete_addresses:
+    if current_exists and not ttl_changed and not obsolete_addresses:
         logger.info("DNS already up to date")
 
     return 0

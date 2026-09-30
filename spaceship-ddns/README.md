@@ -2,8 +2,9 @@
 
 Dynamic DNS updater for domains managed through the Spaceship DNS API.
 
-The script detects the current public IPv4 address, compares it with the
-configured DNS `A` record and updates Spaceship only when necessary.
+The script detects the current public IPv4 address, compares it and the
+configured TTL with the DNS `A` record, and updates Spaceship only when
+necessary.
 
 It also removes obsolete addresses left by previous IP changes.
 
@@ -74,6 +75,12 @@ removes obsolete addresses.
 
 This order avoids leaving the domain without an `A` record if an API request
 fails during an update.
+
+If the IP is unchanged but the configured `TTL` differs from the record's TTL,
+the script saves that `A` record with the new TTL. If both values already match,
+it makes no write request. A failed save exits with an error. Spaceship documents
+the `PUT` endpoint as adding records or updating their TTL in its
+[DNS records API](https://docs.spaceship.dev/).
 
 ## systemd
 
@@ -165,7 +172,8 @@ spaceship-ddns/
 ├── README.md
 ├── spaceship-ddns.py
 ├── spaceship-ddns.service.example
-└── spaceship-ddns.timer
+├── spaceship-ddns.timer
+└── tests/
 ```
 
 The `.env` file contains local credentials and should not be versioned.
