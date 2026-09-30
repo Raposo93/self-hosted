@@ -16,6 +16,50 @@ SPEC.loader.exec_module(checker)
 
 
 class RestoreTests(unittest.TestCase):
+    def test_same_archive_and_sentinel_restore_from_each_profile_group(self):
+        rows = [
+            {"backup-type": "host", "backup-id": "photos", "backup-time": 100},
+            {"backup-type": "host", "backup-id": "documents", "backup-time": 200},
+        ]
+        for backup_id, timestamp in (("photos", "00:01:40"), ("documents", "00:03:20")):
+            with (
+                self.subTest(backup_id=backup_id),
+                tempfile.TemporaryDirectory() as base,
+            ):
+                calls = []
+
+                def fake_client(arguments, calls=calls):
+                    calls.append(arguments)
+                    if arguments[0] == "snapshot":
+                        return json.dumps(rows)
+                    target = Path(arguments[3])
+                    target.mkdir()
+                    (target / ".pbc-restore-sentinel").write_text(
+                        "pbc-restore-sentinel-v1\n"
+                    )
+                    return ""
+
+                with (
+                    patch.dict(
+                        os.environ,
+                        {
+                            "REPO": "fake",
+                            "RESTORE_GROUP": f"host/{backup_id}",
+                            "BACKUP_NAME": "data.pxar",
+                            "RESTORE_TMP_BASE": base,
+                        },
+                        clear=True,
+                    ),
+                    patch.object(checker, "client", side_effect=fake_client),
+                    patch.object(checker.time, "time", return_value=300),
+                ):
+                    self.assertIn(f"host/{backup_id}", checker.verify())
+                self.assertEqual(calls[0][2], f"host/{backup_id}")
+                self.assertEqual(
+                    calls[1][1], f"host/{backup_id}/1970-01-01T{timestamp}Z"
+                )
+                self.assertEqual(calls[1][2], "data.pxar")
+
     def test_latest_filters_group_and_sorts(self):
         rows = [
             {"backup-type": "host", "backup-id": "test", "backup-time": 100},

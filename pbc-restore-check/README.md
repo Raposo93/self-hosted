@@ -18,10 +18,17 @@ printf 'pbc-restore-sentinel-v1\n' > /path/to/data/.pbc-restore-sentinel
 Ensure it is included in a subsequent successful backup before enabling checks.
 Do not create or modify the sentinel from this checker. Copy `.env.example` to
 `.env.<profile>` here and set `REPO`, `BACKUP_NAME` and `RESTORE_GROUP` to match
-that backup. The group is `host/<backup-id>`; PBC defaults the backup ID to the
-backup machine's hostname, but confirm it in PBS. The checker filters JSON
-snapshot results by this exact group and selects the greatest `backup-time`.
+that backup. For a backup profile with `BACKUP_ID="example-profile"`, use
+`RESTORE_GROUP="host/example-profile"`; this matches the supplied examples.
+For a legacy backup profile without `BACKUP_ID`, use its existing
+`host/<backup-hostname>` group and confirm it in PBS. `RESTORE_GROUP` is
+required; an empty value fails. The checker filters JSON snapshot results by
+this exact group and selects the greatest `backup-time`.
 It never falls back to an older snapshot if the newest one cannot be restored.
+Different profiles can use the same archive name and sentinel content safely
+only when their backup IDs and restore groups are distinct. See the
+[backup profile transition](../pbc/README.md#transition-for-existing-profiles)
+for old snapshots, permissions and retention considerations.
 
 Use the same profile name and encrypted API token/fingerprint credentials as
 [`pbc/`](../pbc/README.md). The authentication identity must be allowed to list

@@ -38,6 +38,7 @@ LOGFILE="/var/log/pbc/example-profile.log"
 SOURCE_DIR="/path/to/data"
 REPO="user@realm!api_token_name@host:datastore"
 BACKUP_NAME="data.pxar"
+BACKUP_ID="example-profile"
 
 RECIPIENT_EMAIL="recipient@example.com"
 SENDER_EMAIL="sender@example.com"
@@ -45,6 +46,30 @@ MSMTP_ACCOUNT="default"
 ```
 
 Profile files such as `.env.example-profile` or `.env.ssh` must not be committed.
+
+`BACKUP_ID` identifies this profile in PBS. With this example, backups belong
+to `host/example-profile`. Use a different ID for each profile targeting the
+same datastore and namespace, even when their archive names or sentinel files
+are the same. The ID must start with a letter or digit and may contain only
+letters, digits, `_`, `.` and `-`. An explicitly empty or invalid ID fails
+before the client runs. If `BACKUP_ID` is omitted, the script passes no
+`--backup-id` option and PBC continues to use its default hostname. Omission
+does **not** isolate profiles from each other.
+
+### Transition for existing profiles
+
+Before setting `BACKUP_ID` on an existing profile, record its current PBS group
+(`host/<backup-hostname>`) and decide on a distinct ID for every profile that
+shares a datastore and namespace. Set `BACKUP_ID` in each backup profile and
+set the matching `RESTORE_GROUP="host/<backup-id>"` in its restore-check
+profile. Confirm the first new backup and a successful sentinel restore before
+relying on the new group. Review PBS permissions and ownership for the new
+groups, plus any group-specific retention or prune rules; old and new groups
+have separate histories. The script does not move or delete old snapshots.
+They remain restorable by selecting the old `host/<backup-hostname>/<time>`
+snapshot and its archive name with the credentials and encryption key used for
+those backups. To keep checking the old group during the transition, use a
+separate restore-check profile with its original `RESTORE_GROUP`.
 
 Repository format:
 
@@ -191,7 +216,7 @@ systemctl list-timers 'pbc-backup*'
 
 The script:
 
-* validates the profile variables
+* validates the profile variables, including any explicit `BACKUP_ID`
 * checks that `SOURCE_DIR` exists
 * uses PBS credentials loaded by the systemd service
 * runs `proxmox-backup-client backup`

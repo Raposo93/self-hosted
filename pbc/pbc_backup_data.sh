@@ -26,6 +26,15 @@ fi
 : "${SENDER_EMAIL:?Missing SENDER_EMAIL}"
 : "${MSMTP_ACCOUNT:?Missing MSMTP_ACCOUNT}"
 
+BACKUP_ID_ARGS=()
+if [[ ${BACKUP_ID+x} ]]; then
+    if [[ ! "$BACKUP_ID" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
+        echo "Error: BACKUP_ID must start with an alphanumeric character and contain only letters, digits, _, . or -" >&2
+        exit 1
+    fi
+    BACKUP_ID_ARGS=(--backup-id "$BACKUP_ID")
+fi
+
 if [[ ! -d "$SOURCE_DIR" ]]; then
     echo "Error: Source directory does not exist: $SOURCE_DIR" >&2
     exit 1
@@ -46,6 +55,9 @@ log "========== Backup started at $START_TIME =========="
 log "Host: $HOSTNAME"
 log "Source: $SOURCE_DIR"
 log "Archive: $BACKUP_NAME"
+if [[ ${BACKUP_ID+x} ]]; then
+    log "Backup ID: $BACKUP_ID"
+fi
 
 ENCRYPTION_KEYFILE_SET=false
 ENCRYPTION_CREDENTIAL_SET=false
@@ -74,6 +86,7 @@ set +e
 
 proxmox-backup-client backup "$BACKUP_NAME:$SOURCE_DIR" \
     --repository "$REPO" \
+    "${BACKUP_ID_ARGS[@]}" \
     "${ENCRYPTION_ARGS[@]}" \
     --change-detection-mode metadata \
     --skip-e2big-xattr \

@@ -122,6 +122,9 @@ if ((${#PYTHON_SCRIPTS[@]} > 0)); then
     if [[ -d pbc-restore-check/tests ]]; then
         "$PROJECT_PYTHON" -m unittest discover -s pbc-restore-check/tests -v
     fi
+    if [[ -d pbc/tests ]]; then
+        "$PROJECT_PYTHON" -m unittest discover -s pbc/tests -v
+    fi
     if [[ -d acme_haproxy/tests ]]; then
         "$PROJECT_PYTHON" -m unittest discover -s acme_haproxy/tests -v
     fi
