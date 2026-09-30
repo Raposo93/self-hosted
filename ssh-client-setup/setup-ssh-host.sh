@@ -60,7 +60,7 @@ if [[ -e "$ssh_config" && ! -f "$ssh_config" || -L "$ssh_config" ]]; then
     exit 1
 fi
 
-if [[ "$config_key_file" == *'"'* || "$config_key_file" == *'\'* || "$config_key_file" == *'%'* || "$config_key_file" == *$'\n'* ]]; then
+if [[ "$config_key_file" == *'"'* || "$config_key_file" == *$'\\'* || "$config_key_file" == *'%'* || "$config_key_file" == *$'\n'* ]]; then
     echo "Error: home directory path cannot be represented safely in SSH config." >&2
     exit 1
 fi
