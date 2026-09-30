@@ -68,8 +68,19 @@ class RestoreTests(unittest.TestCase):
         self.assertNotIn("lxc.mount", clean)
         self.assertNotIn("dev0", clean)
 
-    def exercise(self, kind="vm", fail_restore=False, fail_cleanup=False, bind=False):
+    def exercise(
+        self,
+        kind="vm",
+        fail_restore=False,
+        fail_cleanup=False,
+        bind=False,
+        vm_cpu="",
+        host_vcpus=4,
+        max_test_vcpus=None,
+        expected_cpu=None,
+    ):
         cfg = self.config()
+        cfg.max_test_vcpus = max_test_vcpus
         guest = cfg.guests[0 if kind == "vm" else 1]
         calls = []
         with tempfile.TemporaryDirectory() as tmp:
@@ -100,12 +111,16 @@ class RestoreTests(unittest.TestCase):
                     path.write_text(
                         ("scsi0" if kind == "vm" else "rootfs")
                         + ": local-lvm:vm-999-disk-0\nnet0: bridge=vmbr0\nhookscript: local:hook\n"
+                        + vm_cpu
                     )
                     if fail_restore:
                         raise rc.Failure("restore failed")
                 if args[:2] == [tool, "start"]:
                     self.assertNotIn("net0:", path.read_text())
                     self.assertNotIn("hookscript:", path.read_text())
+                    if expected_cpu is not None:
+                        for line in expected_cpu:
+                            self.assertIn(line + "\n", path.read_text())
                 if args[:2] == [tool, "status"]:
                     return "status: running"
                 if args[:2] == [tool, "destroy"]:
@@ -114,7 +129,10 @@ class RestoreTests(unittest.TestCase):
                     path.unlink()
                 return ""
 
-            with patch.object(rc, "command", side_effect=fake):
+            with (
+                patch.object(rc, "command", side_effect=fake),
+                patch.object(rc, "host_cpu_capacity", return_value=host_vcpus),
+            ):
                 result = runner.test(guest)
         return result, calls
 
@@ -130,6 +148,63 @@ class RestoreTests(unittest.TestCase):
                 calls,
             )
             self.assertEqual(calls[-1][1], "destroy")
+
+    def test_large_vm_is_capped_before_start_and_reported(self):
+        result, calls = self.exercise(
+            vm_cpu="cores: 4\nsockets: 2\nvcpus: 8\n",
+            expected_cpu=("cores: 4", "sockets: 1", "vcpus: 4"),
+        )
+        self.assertEqual(result[0], "OK")
+        self.assertIn("CPU adjusted: 8 -> 4 vCPU; reason: DR host capacity", result[1])
+        self.assertIn(["qm", "start", "999"], calls)
+
+    def test_explicit_limit_caps_topology_and_hotplug_count(self):
+        result, _ = self.exercise(
+            vm_cpu="cores: 4\nsockets: 2\nvcpus: 3\n",
+            host_vcpus=8,
+            max_test_vcpus=2,
+            expected_cpu=("cores: 2", "sockets: 1", "vcpus: 2"),
+        )
+        self.assertEqual(result[0], "OK")
+        self.assertIn("initial vcpus: 3 -> 2", result[1])
+        self.assertIn("reason: configured test limit", result[1])
+
+    def test_vm_within_host_limit_keeps_cpu_fields(self):
+        result, _ = self.exercise(
+            vm_cpu="cores: 2\nsockets: 2\nvcpus: 3\n",
+            expected_cpu=("cores: 2", "sockets: 2", "vcpus: 3"),
+        )
+        self.assertEqual(result[0], "OK")
+        self.assertNotIn("CPU adjusted", result[1])
+
+    def test_invalid_cpu_topology_fails_before_start(self):
+        result, calls = self.exercise(vm_cpu="cores: 2\nsockets: 1\nvcpus: 3\n")
+        self.assertEqual(result[0], "FAIL")
+        self.assertNotIn(["qm", "start", "999"], calls)
+
+    def test_host_cpu_capacity_respects_affinity(self):
+        with (
+            patch.object(rc.os, "cpu_count", return_value=8),
+            patch.object(rc.os, "sched_getaffinity", return_value={0, 1, 2, 3}),
+        ):
+            self.assertEqual(rc.host_cpu_capacity(), 4)
+        with (
+            patch.object(rc.os, "cpu_count", return_value=None),
+            patch.object(rc.os, "sched_getaffinity", return_value=set()),
+            self.assertRaises(rc.Failure),
+        ):
+            rc.host_cpu_capacity()
+
+    def test_config_rejects_invalid_test_cpu_limit(self):
+        example = Path(__file__).resolve().parents[1] / "config.example.json"
+        data = json.loads(example.read_text())
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            for invalid in (0, -1, True, "4"):
+                data["max_test_vcpus"] = invalid
+                path.write_text(json.dumps(data))
+                with self.assertRaisesRegex(ValueError, "max_test_vcpus"):
+                    rc.load_config(path)
 
     def test_partial_restore_is_cleaned_without_start(self):
         result, calls = self.exercise(fail_restore=True)

@@ -60,6 +60,7 @@ class Config:
     guests: list[Guest]
     restore_timeout: int = 3600
     poweroff: bool = False
+    max_test_vcpus: int | None = None
 
 
 def load_config(path: Path) -> Config:
@@ -77,6 +78,10 @@ def load_config(path: Path) -> Config:
         raise ValueError("Temporary ID or guest list invalid")
     if type(config.restore_timeout) is not int or config.restore_timeout <= 0:
         raise ValueError("Invalid restore timeout")
+    if config.max_test_vcpus is not None and (
+        type(config.max_test_vcpus) is not int or config.max_test_vcpus <= 0
+    ):
+        raise ValueError("Invalid max_test_vcpus")
     if not config.mail_to or any(c in config.mail_to for c in "\r\n"):
         raise ValueError("Invalid mail recipient")
     for guest in config.guests:
@@ -135,6 +140,7 @@ def sanitize(
         "scsihw",
         "smbios1",
         "sockets",
+        "vcpus",
         "vga",
     }
     ct_keys = {
@@ -183,6 +189,60 @@ def sanitize(
     return "\n".join(kept) + "\n", removed
 
 
+def host_cpu_capacity() -> int:
+    capacity = os.cpu_count()
+    if hasattr(os, "sched_getaffinity"):
+        capacity = min(capacity or 0, len(os.sched_getaffinity(0)))
+    if not capacity:
+        raise Failure("Cannot determine DR host CPU capacity")
+    return capacity
+
+
+def normalize_vm_cpus(
+    config: str, host_vcpus: int, max_test_vcpus: int | None
+) -> tuple[str, str | None]:
+    """Cap the temporary VM's maximum topology and initial hotplug count."""
+    lines = config.splitlines()
+    fields = {}
+    for index, line in enumerate(lines):
+        key, _, value = line.partition(":")
+        if key not in ("cores", "sockets", "vcpus"):
+            continue
+        if key in fields or not re.fullmatch(r"[1-9]\d*", value.strip()):
+            raise Failure(f"Invalid restored VM {key}")
+        fields[key] = (index, int(value.strip()))
+    cores = fields.get("cores", (None, 1))[1]
+    sockets = fields.get("sockets", (None, 1))[1]
+    source_max = cores * sockets
+    initial = fields.get("vcpus", (None, source_max))[1]
+    if initial > source_max:
+        raise Failure("Restored VM vcpus exceeds cores * sockets")
+    limit = min(host_vcpus, max_test_vcpus or host_vcpus)
+    if source_max <= limit:
+        return config, None
+    # A single socket gives an exact cap even when the old topology does not
+    # divide the smaller host's thread count.
+    replacements = {"cores": limit, "sockets": 1}
+    if "vcpus" in fields:
+        replacements["vcpus"] = min(initial, limit)
+    for key, value in replacements.items():
+        if key in fields:
+            lines[fields[key][0]] = f"{key}: {value}"
+        else:
+            lines.append(f"{key}: {value}")
+    reason = (
+        "configured test limit"
+        if max_test_vcpus is not None
+        and max_test_vcpus < host_vcpus
+        and max_test_vcpus < source_max
+        else "DR host capacity"
+    )
+    adjustment = f"CPU adjusted: {source_max} -> {limit} vCPU"
+    if "vcpus" in fields and initial != source_max:
+        adjustment += f" maximum; initial vcpus: {initial} -> {min(initial, limit)}"
+    return "\n".join(lines) + "\n", f"{adjustment}; reason: {reason}"
+
+
 class Runner:
     def __init__(self, config: Config):
         self.config = config
@@ -227,6 +287,7 @@ class Runner:
         try:
             if any(p.exists() for p in self.paths()):
                 return "FAIL", details[0] + ": temporary ID occupied", False
+            host_vcpus = host_cpu_capacity() if guest.kind == "vm" else 0
             volume = latest_backup(
                 command(
                     [
@@ -263,6 +324,12 @@ class Runner:
             clean, removed = sanitize(
                 path.read_text(), guest.kind, cfg.target_storage, cfg.temporary_id
             )
+            if guest.kind == "vm":
+                clean, cpu_adjustment = normalize_vm_cpus(
+                    clean, host_vcpus, cfg.max_test_vcpus
+                )
+                if cpu_adjustment:
+                    details.append(cpu_adjustment)
             path.write_text(clean)
             if path.read_text() != clean:
                 raise Failure("Sanitized configuration verification failed")

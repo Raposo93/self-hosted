@@ -28,7 +28,8 @@ ID exclusively and do not create/edit guests manually during a run. The target
 must be local `dir`, `lvmthin`, or `zfspool`, dedicated to tests, with enough
 space for the largest restored guest. No shared production disks or mounts.
 Check actual storage paths: the PVE storage type alone cannot establish physical
-separation. The node must have sufficient RAM/CPU for each guest in turn.
+separation. The node must have sufficient RAM for each guest in turn. VM CPU
+topology is capped to the host's available logical CPUs before boot.
 
 Restores do not start guests automatically. Before explicit startup, the script
 rewrites the restored configuration using an allowlist of boot essentials:
@@ -39,6 +40,11 @@ Retained disks/mount volumes must point to the configured target storage and
 belong to the reserved temporary ID or
 startup is refused. This deliberately changes the test hardware and may stop
 some guests from booting. Network-dependent boot cannot be validated offline.
+For VMs, the script keeps `cores`, `sockets` and `vcpus` when the maximum
+`cores * sockets` fits. Otherwise it changes the temporary VM to one socket
+and at most the allowed number of cores, and caps `vcpus` if present. The limit
+is the smaller of the host's available logical CPU count and optional
+`max_test_vcpus`. The PBS backup and source VM are never edited.
 LXC backups with host bind/device mounts are refused before restore; create
 a backup without these mounts for this drill. No isolated bridge or routing
 configuration is needed. Treat backups as trusted
@@ -52,7 +58,9 @@ storage IDs, reserved `temporary_id`, recipient and explicit guest inventory.
 JSON avoids an additional YAML dependency. Keep the private config outside Git.
 `agent: true` requires a configured, working QEMU Guest Agent in that backup.
 `boot_timeout` covers start plus state/health polling. `restore_timeout` bounds
-each restore command. CLI calls and cleanup also have bounded timeouts.
+each restore command. `max_test_vcpus` is an optional positive integer for a
+stricter DR drill CPU cap; omit it to use host capacity. CLI calls and cleanup
+also have bounded timeouts.
 
 Configure [mail-notifier](../mail-notifier/README.md) for root, ensuring
 `send-mail.sh` is executable. First run manually on the dedicated test node:
@@ -87,7 +95,8 @@ to wake after poweroff independently.
 
 The journal/stdout and single email include source ID/name, selected backup
 timestamp, restore/boot duration on success, health check result, removed options,
-failure reason and cleanup outcome. Totals distinguish OK, WARN, FAIL and SKIP.
+CPU reductions, failure reason and cleanup outcome. A CPU reduction alone is
+not a failure. Totals distinguish OK, WARN, FAIL and SKIP.
 Each latest backup is chosen by UTC timestamp from PVE's JSON PBS volume list.
 No backup age limit or application checks are implied.
 

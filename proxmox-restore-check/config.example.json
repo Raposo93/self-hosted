@@ -5,6 +5,7 @@
   "temporary_id": 990000,
   "mail_to": "operator@example.com",
   "restore_timeout": 3600,
+  "max_test_vcpus": 4,
   "poweroff": false,
   "guests": [
     {"kind": "vm", "source_id": 100, "name": "example-vm", "agent": true, "boot_timeout": 180},
