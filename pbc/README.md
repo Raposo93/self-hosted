@@ -23,6 +23,7 @@ Each backup profile uses its own environment file and can be scheduled with a sy
 * PBS user or API token with backup permissions
 * `systemd-creds`
 * `msmtp` configured for email notifications
+* `curl` when optional healthcheck monitoring is configured
 
 ## Create a backup profile
 
@@ -216,6 +217,19 @@ journalctl -u pbc-backup@example-profile.service
 
 ## Scheduling
 
+### Optional missed-run monitoring
+
+Set `HEALTHCHECK_URL` in a private profile file to a Healthchecks-compatible
+ping URL, for example `https://monitor.example.com/ping/your-private-id`.
+Immediately before PBC starts, the script sends a ping to `<url>/start`.
+After PBC finishes, it pings `<url>` on success or `<url>/fail` on failure.
+The monitoring service must be configured with an expected period and grace
+time matching the profile's timer to detect missed runs. No requests are sent
+when the URL is unset or empty. These pings complement the existing email
+notification; an unavailable monitoring service produces a warning in the
+backup log and never changes the backup exit status. Each request has a
+10-second deadline. Keep the URL private because it contains a check ID.
+
 ### Fixed daily schedule
 
 Suitable for always-on systems.
@@ -268,6 +282,7 @@ The script:
 * includes only the internal mounts named by `INCLUDE_DEV_MOUNTS`
 * uses PBS credentials loaded by the systemd service
 * runs `proxmox-backup-client backup`
+* optionally reports backup start and outcome to a healthcheck endpoint
 * writes the configured log file
 * sends an email notification
 * exits with the backup command status

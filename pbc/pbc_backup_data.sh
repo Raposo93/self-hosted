@@ -119,6 +119,21 @@ log() {
     echo "$*" >> "$LOGFILE"
 }
 
+report_health() {
+    local phase="$1" endpoint="${HEALTHCHECK_URL%/}" curl_status
+    case "$phase" in
+        start) endpoint+="/start" ;;
+        fail) endpoint+="/fail" ;;
+    esac
+    if curl --fail --silent --show-error --output /dev/null \
+        --connect-timeout 5 --max-time 10 "$endpoint" 2>/dev/null; then
+        log "Healthcheck $phase reported"
+    else
+        curl_status=$?
+        log "Warning: Healthcheck $phase failed (curl exit code: $curl_status)"
+    fi
+}
+
 log "========== Backup started at $START_TIME =========="
 log "Host: $HOSTNAME"
 log "Source: $SOURCE_DIR"
@@ -152,6 +167,10 @@ fi
 
 set +e
 
+if [[ -n "${HEALTHCHECK_URL:-}" ]]; then
+    report_health start
+fi
+
 proxmox-backup-client backup "$BACKUP_NAME:$SOURCE_DIR" \
     --repository "$REPO" \
     "${BACKUP_ID_ARGS[@]}" \
@@ -165,6 +184,14 @@ proxmox-backup-client backup "$BACKUP_NAME:$SOURCE_DIR" \
 STATUS=$?
 
 set -e
+
+if [[ -n "${HEALTHCHECK_URL:-}" ]]; then
+    if [[ "$STATUS" -eq 0 ]]; then
+        report_health success
+    else
+        report_health fail
+    fi
+fi
 
 END_TIME="$(date +"%Y-%m-%d %H:%M:%S")"
 DURATION="$SECONDS"
