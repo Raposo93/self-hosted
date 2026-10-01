@@ -43,10 +43,12 @@ class BackupIdTests(unittest.TestCase):
             "MSMTP_ACCOUNT": "default",
         }
 
-    def run_backup(self, backup_id=None):
+    def run_backup(self, backup_id=None, namespace=None):
         environment = self.environment.copy()
         if backup_id is not None:
             environment["BACKUP_ID"] = backup_id
+        if namespace is not None:
+            environment["NAMESPACE"] = namespace
         return subprocess.run(
             ["bash", str(SCRIPT)],
             env=environment,
@@ -78,6 +80,15 @@ class BackupIdTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("BACKUP_ID", result.stderr)
                 self.assertFalse(self.calls.exists())
+
+    def test_namespace_is_optional_and_passed_as_one_argument(self):
+        self.assertEqual(self.run_backup().returncode, 0)
+        self.assertEqual(self.run_backup(namespace="").returncode, 0)
+        self.assertEqual(self.run_backup(namespace="team backups").returncode, 0)
+        calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
+        self.assertNotIn("--ns", calls[0])
+        self.assertNotIn("--ns", calls[1])
+        self.assertEqual(calls[2][calls[2].index("--ns") + 1], "team backups")
 
 
 if __name__ == "__main__":

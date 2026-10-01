@@ -57,6 +57,12 @@ before the client runs. If `BACKUP_ID` is omitted, the script passes no
 `--backup-id` option and PBC continues to use its default hostname. Omission
 does **not** isolate profiles from each other.
 
+Set `NAMESPACE` only if this profile should back up into a PBS datastore
+namespace. For example, `NAMESPACE="application-backups"` passes
+`--ns application-backups` to the client. Leaving it unset or empty uses the
+datastore's default namespace, as before. Create the namespace and grant the
+token access to it in PBS before using this option.
+
 ### Mounted sources and included mounts
 
 For a disk or network share, set `EXPECTED_MOUNT` to the mount point containing

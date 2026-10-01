@@ -35,6 +35,11 @@ if [[ ${BACKUP_ID+x} ]]; then
     BACKUP_ID_ARGS=(--backup-id "$BACKUP_ID")
 fi
 
+NAMESPACE_ARGS=()
+if [[ -n "${NAMESPACE:-}" ]]; then
+    NAMESPACE_ARGS=(--ns "$NAMESPACE")
+fi
+
 if [[ ! -d "$SOURCE_DIR" ]]; then
     echo "Error: Source directory does not exist: $SOURCE_DIR" >&2
     exit 1
@@ -150,6 +155,7 @@ set +e
 proxmox-backup-client backup "$BACKUP_NAME:$SOURCE_DIR" \
     --repository "$REPO" \
     "${BACKUP_ID_ARGS[@]}" \
+    "${NAMESPACE_ARGS[@]}" \
     "${ENCRYPTION_ARGS[@]}" \
     "${INCLUDE_DEV_ARGS[@]}" \
     --change-detection-mode metadata \
