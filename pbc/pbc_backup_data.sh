@@ -165,38 +165,85 @@ if [[ "$ENCRYPTION_KEYFILE_SET" == true ]]; then
     ENCRYPTION_ARGS=(--keyfile "$ENCRYPTION_KEYFILE")
 fi
 
-set +e
+PRE_EXIT=0
+POST_EXIT=0
+PBC_EXIT=0
+BACKUP_ATTEMPTED=false
 
-if [[ -n "${HEALTHCHECK_URL:-}" ]]; then
-    report_health start
-fi
+if [[ -n "${PRE_BACKUP_HOOK:-}" && ( ! -f "$PRE_BACKUP_HOOK" || ! -x "$PRE_BACKUP_HOOK" ) ]]; then
+    log "Error: Pre-backup hook is not an executable file: $PRE_BACKUP_HOOK"
+    PRE_EXIT=126
+elif [[ -n "${POST_BACKUP_HOOK:-}" && ( ! -f "$POST_BACKUP_HOOK" || ! -x "$POST_BACKUP_HOOK" ) ]]; then
+    log "Error: Post-backup hook is not an executable file: $POST_BACKUP_HOOK"
+    POST_EXIT=126
+else
+    if [[ -n "${PRE_BACKUP_HOOK:-}" ]]; then
+        log "Running pre-backup hook: $PRE_BACKUP_HOOK"
+        if "$PRE_BACKUP_HOOK" >> "$LOGFILE" 2>&1; then
+            log "Pre-backup hook exit code: 0"
+        else
+            PRE_EXIT=$?
+            log "Pre-backup hook exit code: $PRE_EXIT"
+        fi
+    fi
 
-proxmox-backup-client backup "$BACKUP_NAME:$SOURCE_DIR" \
-    --repository "$REPO" \
-    "${BACKUP_ID_ARGS[@]}" \
-    "${NAMESPACE_ARGS[@]}" \
-    "${ENCRYPTION_ARGS[@]}" \
-    "${INCLUDE_DEV_ARGS[@]}" \
-    --change-detection-mode metadata \
-    --skip-e2big-xattr \
-    >> "$LOGFILE" 2>&1
+    if [[ "$PRE_EXIT" -eq 0 ]]; then
+        if [[ -n "${HEALTHCHECK_URL:-}" ]]; then
+            report_health start
+        fi
 
-STATUS=$?
+        BACKUP_ATTEMPTED=true
+        if proxmox-backup-client backup "$BACKUP_NAME:$SOURCE_DIR" \
+            --repository "$REPO" \
+            "${BACKUP_ID_ARGS[@]}" \
+            "${NAMESPACE_ARGS[@]}" \
+            "${ENCRYPTION_ARGS[@]}" \
+            "${INCLUDE_DEV_ARGS[@]}" \
+            --change-detection-mode metadata \
+            --skip-e2big-xattr \
+            >> "$LOGFILE" 2>&1; then
+            PBC_EXIT=0
+        else
+            PBC_EXIT=$?
+        fi
 
-set -e
+        if [[ -n "${HEALTHCHECK_URL:-}" ]]; then
+            if [[ "$PBC_EXIT" -eq 0 ]]; then
+                report_health success
+            else
+                report_health fail
+            fi
+        fi
 
-if [[ -n "${HEALTHCHECK_URL:-}" ]]; then
-    if [[ "$STATUS" -eq 0 ]]; then
-        report_health success
-    else
-        report_health fail
+        if [[ -n "${POST_BACKUP_HOOK:-}" ]]; then
+            log "Running post-backup hook: $POST_BACKUP_HOOK"
+            if "$POST_BACKUP_HOOK" >> "$LOGFILE" 2>&1; then
+                log "Post-backup hook exit code: 0"
+            else
+                POST_EXIT=$?
+                log "Post-backup hook exit code: $POST_EXIT"
+            fi
+        fi
     fi
 fi
 
 END_TIME="$(date +"%Y-%m-%d %H:%M:%S")"
 DURATION="$SECONDS"
 
-log "Backup exit code: $STATUS"
+if [[ "$BACKUP_ATTEMPTED" == true ]]; then
+    log "Backup exit code: $PBC_EXIT"
+else
+    log "Backup not started"
+fi
+STATUS=0
+if [[ "$PRE_EXIT" -ne 0 ]]; then
+    STATUS="$PRE_EXIT"
+elif [[ "$PBC_EXIT" -ne 0 ]]; then
+    STATUS="$PBC_EXIT"
+elif [[ "$POST_EXIT" -ne 0 ]]; then
+    STATUS="$POST_EXIT"
+fi
+log "Overall exit code: $STATUS"
 log "Duration: ${DURATION}s"
 log "========== Backup ended at $END_TIME =========="
 

@@ -230,6 +230,25 @@ notification; an unavailable monitoring service produces a warning in the
 backup log and never changes the backup exit status. Each request has a
 10-second deadline. Keep the URL private because it contains a check ID.
 
+### Optional preparation and cleanup hooks
+
+Set `PRE_BACKUP_HOOK` and/or `POST_BACKUP_HOOK` in a private profile to
+executable files, using absolute paths. For example, an application profile
+can run a pre-hook that writes a fresh logical database dump into `SOURCE_DIR`
+and a post-hook that removes that temporary dump after the backup attempt.
+Keep the dump and hook scripts outside Git if they contain private data or
+credentials. Hook output and exit codes go to `LOGFILE` and the existing email.
+
+The pre-hook runs before PBC. If it fails, PBC and the post-hook do not run;
+the service fails and sends a failure email. After a successful pre-hook (or
+when no pre-hook is configured), the post-hook runs after the PBC attempt even
+if PBC fails. A configured hook that is missing or not executable fails the
+run before preparation or backup starts. If PBC and the post-hook both fail,
+the service returns the PBC exit code while logging both failures. If only
+the post-hook fails, the service returns its exit code. Healthcheck pings
+describe the PBC attempt; a pre-hook failure sends no ping, and post-hook
+failure does not change the PBC outcome ping. Email reports the overall run.
+
 ### Fixed daily schedule
 
 Suitable for always-on systems.
@@ -282,10 +301,11 @@ The script:
 * includes only the internal mounts named by `INCLUDE_DEV_MOUNTS`
 * uses PBS credentials loaded by the systemd service
 * runs `proxmox-backup-client backup`
+* optionally runs preparation and cleanup hooks around PBC
 * optionally reports backup start and outcome to a healthcheck endpoint
 * writes the configured log file
 * sends an email notification
-* exits with the backup command status
+* exits with the backup status, or a hook failure status when no backup failed
 
 ## Security
 
