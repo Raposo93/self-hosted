@@ -64,12 +64,16 @@ class HookTests(unittest.TestCase):
     def test_successful_hooks_surround_backup(self):
         result = self.run_backup()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.events.read_text().splitlines(), ["pre", "backup", "post"])
+        self.assertEqual(
+            self.events.read_text().splitlines(), ["pre", "backup", "post"]
+        )
         self.assertIn("Pre-backup hook exit code: 0", self.log.read_text())
         self.assertIn("Post-backup hook exit code: 0", self.log.read_text())
 
     def test_failed_pre_hook_skips_backup_and_post_hook(self):
-        result = self.run_backup(PRE_STATUS="12", HEALTHCHECK_URL="https://example.test/id")
+        result = self.run_backup(
+            PRE_STATUS="12", HEALTHCHECK_URL="https://example.test/id"
+        )
         self.assertEqual(result.returncode, 12)
         self.assertEqual(self.events.read_text().splitlines(), ["pre"])
         self.assertIn("Backup not started", self.log.read_text())
@@ -79,7 +83,9 @@ class HookTests(unittest.TestCase):
     def test_post_hook_runs_after_failed_backup(self):
         result = self.run_backup(BACKUP_STATUS="23")
         self.assertEqual(result.returncode, 23)
-        self.assertEqual(self.events.read_text().splitlines(), ["pre", "backup", "post"])
+        self.assertEqual(
+            self.events.read_text().splitlines(), ["pre", "backup", "post"]
+        )
         self.assertIn("Backup exit code: 23", self.mail.read_text())
 
     def test_both_failures_are_logged_and_backup_status_is_returned(self):
@@ -91,14 +97,18 @@ class HookTests(unittest.TestCase):
     def test_post_hook_failure_fails_successful_backup_run(self):
         result = self.run_backup(POST_STATUS="17")
         self.assertEqual(result.returncode, 17)
-        self.assertEqual(self.events.read_text().splitlines(), ["pre", "backup", "post"])
+        self.assertEqual(
+            self.events.read_text().splitlines(), ["pre", "backup", "post"]
+        )
         self.assertIn("Backup failed", self.mail.read_text())
 
     def test_nonexecutable_post_hook_fails_before_preparation(self):
         result = self.run_backup(POST_BACKUP_HOOK=str(self.base / "missing.sh"))
         self.assertEqual(result.returncode, 126)
         self.assertFalse(self.events.exists())
-        self.assertIn("Post-backup hook is not an executable file", self.mail.read_text())
+        self.assertIn(
+            "Post-backup hook is not an executable file", self.mail.read_text()
+        )
 
 
 if __name__ == "__main__":

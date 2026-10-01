@@ -71,7 +71,8 @@ class HealthcheckTests(unittest.TestCase):
 
     def test_start_and_success_pings_surround_backup(self):
         self.assertEqual(
-            self.run_backup(HEALTHCHECK_URL="https://example.test/private/").returncode, 0
+            self.run_backup(HEALTHCHECK_URL="https://example.test/private/").returncode,
+            0,
         )
         events = self.read_events()
         self.assertEqual([event[0] for event in events], ["curl", "backup", "curl"])
