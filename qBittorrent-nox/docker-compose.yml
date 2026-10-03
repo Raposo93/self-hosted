@@ -26,6 +26,9 @@ services:
   qbittorrent-log:
     image: busybox:1.38.0
     container_name: qbittorrent-log
+    # qBittorrent's container stdout is intentionally sparse; tail the
+    # application log so operational settings and runtime events are visible
+    # through `docker logs`.
     restart: unless-stopped
     depends_on:
       - qbittorrent-nox
