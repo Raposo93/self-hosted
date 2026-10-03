@@ -18,7 +18,8 @@ printf 'pbc-restore-sentinel-v1\n' > /path/to/data/.pbc-restore-sentinel
 Ensure it is included in a subsequent successful backup before enabling checks.
 Do not create or modify the sentinel from this checker. Copy `.env.example` to
 `.env.<profile>` here and set `REPO`, `BACKUP_NAME` and `RESTORE_GROUP` to match
-that backup. For a backup profile with `BACKUP_ID="example-profile"`, use
+that backup. Set the same `NAMESPACE` as the backup profile. For a backup
+profile with `BACKUP_ID="example-profile"`, use
 `RESTORE_GROUP="host/example-profile"`; this matches the supplied examples.
 For a legacy backup profile without `BACKUP_ID`, use its existing
 `host/<backup-hostname>` group and confirm it in PBS. `RESTORE_GROUP` is
@@ -26,7 +27,13 @@ required; an empty value fails. The checker filters JSON snapshot results by
 this exact group and selects the greatest `backup-time`.
 It never falls back to an older snapshot if the newest one cannot be restored.
 Different profiles can use the same archive name and sentinel content safely
-only when their backup IDs and restore groups are distinct. See the
+when their backup IDs/restore groups or namespaces are distinct. The checker
+passes a configured namespace to both `snapshot list` and `restore`; a missing
+snapshot in that namespace fails without trying the datastore root. If
+`NAMESPACE` is omitted or empty, it selects the root namespace. The checker
+ignores an inherited `PBS_NAMESPACE` in all cases, so `NAMESPACE` is the only
+namespace setting for this profile and takes precedence when both are set.
+See the
 [backup profile transition](../pbc/README.md#transition-for-existing-profiles)
 for old snapshots, permissions and retention considerations.
 
@@ -38,6 +45,8 @@ an independent restore identity needs the appropriate PBS read permissions
 
 Configuration:
 
+* `NAMESPACE`: same optional datastore namespace as the backup profile; omit
+  or leave empty for the root namespace.
 * `RESTORE_TMP_BASE`: existing writable temporary base directory, with enough
   disk space; each run creates its own private directory.
 * `MAX_SNAPSHOT_AGE_SECONDS`: maximum age; `0` disables the age limit.
@@ -83,7 +92,7 @@ PBC authentication environment variables also work for manual execution.
 View results with `journalctl -u pbc-restore-check@<profile>.service` and timers
 with `systemctl list-timers 'pbc-restore-check*'`. Generic client failure messages
 avoid exposing authentication details; investigate PBS access manually when
-necessary. A successful message identifies the snapshot and archive checked.
+necessary. A successful message identifies the namespace, snapshot and archive checked.
 
 ## Results, cleanup and limitations
 

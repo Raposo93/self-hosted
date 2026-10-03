@@ -142,15 +142,108 @@ class RestoreTests(unittest.TestCase):
                 self.exercise(mode)
 
     def test_client_failure_and_timeout(self):
-        with patch.object(checker.subprocess, "run") as run:
+        with (
+            patch.dict(os.environ, {"PBS_NAMESPACE": "wrong-space"}),
+            patch.object(checker.subprocess, "run") as run,
+        ):
             run.return_value.returncode = 5
             run.return_value.stderr = "private token"
             with self.assertRaisesRegex(ValueError, "exit 5"):
                 checker.client(["restore"])
             self.assertEqual(run.call_args.kwargs["stdin"], subprocess.DEVNULL)
+            self.assertNotIn("PBS_NAMESPACE", run.call_args.kwargs["env"])
             run.side_effect = subprocess.TimeoutExpired("client", 1)
             with self.assertRaises(subprocess.TimeoutExpired):
                 checker.client(["restore"])
+
+    def test_namespace_selection_and_no_root_fallback(self):
+        for name, configured, inherited, expected in [
+            ("omitted", None, None, ""),
+            ("omitted-with-client-default", None, "other", ""),
+            ("empty", "", "other", ""),
+            ("configured", "photos", None, "photos"),
+            ("conflict", "photos", "other", "photos"),
+        ]:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as base:
+                environment = {
+                    "REPO": "fake",
+                    "RESTORE_GROUP": "host/same",
+                    "BACKUP_NAME": "data.pxar",
+                    "RESTORE_TMP_BASE": base,
+                }
+                if configured is not None:
+                    environment["NAMESPACE"] = configured
+                if inherited is not None:
+                    environment["PBS_NAMESPACE"] = inherited
+                calls = []
+
+                def fake_client(arguments, calls=calls, expected=expected):
+                    calls.append(arguments)
+                    selected = (
+                        arguments[arguments.index("--ns") + 1]
+                        if "--ns" in arguments
+                        else ""
+                    )
+                    self.assertEqual(selected, expected)
+                    if arguments[0] == "snapshot":
+                        return json.dumps(
+                            [
+                                {
+                                    "backup-type": "host",
+                                    "backup-id": "same",
+                                    "backup-time": 100,
+                                }
+                            ]
+                        )
+                    target = Path(arguments[3])
+                    target.mkdir()
+                    (target / ".pbc-restore-sentinel").write_text(
+                        "pbc-restore-sentinel-v1\n"
+                    )
+                    return ""
+
+                with (
+                    patch.dict(os.environ, environment, clear=True),
+                    patch.object(checker, "client", side_effect=fake_client),
+                    patch.object(checker.time, "time", return_value=200),
+                ):
+                    result = checker.verify()
+                self.assertEqual(len(calls), 2)
+                self.assertIn(f"namespace {expected or '<root>'}", result)
+
+        with tempfile.TemporaryDirectory() as base:
+            environment = {
+                "REPO": "fake",
+                "RESTORE_GROUP": "host/same",
+                "BACKUP_NAME": "data.pxar",
+                "RESTORE_TMP_BASE": base,
+                "NAMESPACE": "photos",
+            }
+            calls = []
+
+            def missing_snapshot(arguments):
+                calls.append(arguments)
+                # The root contains an identically named group; photos does not.
+                if "--ns" not in arguments:
+                    return json.dumps(
+                        [
+                            {
+                                "backup-type": "host",
+                                "backup-id": "same",
+                                "backup-time": 100,
+                            }
+                        ]
+                    )
+                return "[]"
+
+            with (
+                patch.dict(os.environ, environment, clear=True),
+                patch.object(checker, "client", side_effect=missing_snapshot),
+                self.assertRaisesRegex(ValueError, "No snapshots found"),
+            ):
+                checker.verify()
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0][-2:], ["--ns", "photos"])
 
     def test_encryption_and_config_fail_before_client(self):
         with tempfile.TemporaryDirectory() as base:

@@ -24,8 +24,12 @@ def required(name: str) -> str:
 
 
 def client(arguments: list[str]) -> str:
+    environment = os.environ.copy()
+    # Namespace selection is controlled by NAMESPACE, including an empty root.
+    environment.pop("PBS_NAMESPACE", None)
     result = subprocess.run(
         ["proxmox-backup-client", *arguments],
+        env=environment,
         capture_output=True,
         text=True,
         timeout=int(os.environ.get("RESTORE_TIMEOUT_SECONDS", "3600")),
@@ -65,6 +69,7 @@ def verify() -> str:
     repository = required("REPO")
     group = required("RESTORE_GROUP")
     archive = required("BACKUP_NAME")
+    namespace = os.environ.get("NAMESPACE", "")
     if not re.fullmatch(r"host/[A-Za-z0-9][A-Za-z0-9_.-]*", group):
         raise ValueError("RESTORE_GROUP must be host/<backup-id>")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+\.pxar", archive):
@@ -89,6 +94,8 @@ def verify() -> str:
     if key and not Path(key).is_file():
         raise ValueError("Encryption key is unavailable")
     common = ["--repository", repository]
+    if namespace:
+        common.extend(["--ns", namespace])
     snapshot = latest_snapshot(
         client(["snapshot", "list", group, "--output-format", "json", *common]),
         group,
@@ -123,7 +130,11 @@ def verify() -> str:
             raise CheckError("Sentinel content mismatch")
         if checksum and hashlib.sha256(content).hexdigest() != checksum.lower():
             raise CheckError("Sentinel checksum mismatch")
-    return f"Restored and validated {sentinel} from {snapshot} ({archive})."
+    selected_namespace = namespace or "<root>"
+    return (
+        f"Restored and validated {sentinel} from {snapshot} "
+        f"({archive}, namespace {selected_namespace})."
+    )
 
 
 def interrupted(_signum: int, _frame: object) -> None:
