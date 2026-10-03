@@ -3,5 +3,14 @@
   "extends": [
     "config:recommended"
   ],
-  "dependencyDashboardApproval": true
+  "dependencyDashboardApproval": true,
+  "packageRules": [
+    {
+      "matchPackageNames": [
+        "ghcr.io/immich-app/immich-server",
+        "ghcr.io/immich-app/immich-machine-learning"
+      ],
+      "groupName": "immich"
+    }
+  ]
 }
