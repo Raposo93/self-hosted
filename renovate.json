@@ -4,6 +4,8 @@
     "config:recommended"
   ],
   "dependencyDashboardApproval": true,
+  "commitMessagePrefix": "Chore:",
+  "commitMessageLowerCase": "never",
   "packageRules": [
     {
       "matchPackageNames": [
