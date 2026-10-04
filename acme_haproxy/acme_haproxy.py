@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import fcntl
 import json
 import logging
 import os
@@ -8,6 +9,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 logging.basicConfig(
@@ -23,6 +26,32 @@ HAPROXY_CONFIG = Path("/etc/haproxy/haproxy.cfg")
 HAPROXY_HOSTS_MAP = Path("/etc/haproxy/maps/hosts.map")
 ACME_WEBROOT = Path("/var/www/acme-challenges")
 PENDING_STATE = Path("/etc/haproxy/certs/acme/.acme-haproxy-pending.json")
+
+
+class LockFailure(RuntimeError):
+    pass
+
+
+@contextmanager
+def operation_lock() -> Iterator[None]:
+    # Keep a stable inode: locking the atomically replaced state file is unsafe.
+    path = PENDING_STATE.with_name(".acme-haproxy.lock")
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    except OSError as error:
+        raise LockFailure(
+            f"Cannot open ACME operation lock at {path}: {error}"
+        ) from error
+    with os.fdopen(fd, "r+") as stream:
+        log.info("Waiting for ACME operation lock at %s", path)
+        try:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+        except OSError as error:
+            raise LockFailure(
+                f"Cannot acquire ACME operation lock at {path}: {error}"
+            ) from error
+        log.info("Acquired ACME operation lock")
+        yield
 
 
 class PendingState:
@@ -347,6 +376,15 @@ def _issue_certificate(
 
 
 def renew_all() -> int:
+    try:
+        with operation_lock():
+            return _renew_all_locked()
+    except LockFailure as error:
+        log.error("%s", error)
+        return 1
+
+
+def _renew_all_locked() -> int:
     domains = _load_domains(HAPROXY_HOSTS_MAP)
 
     home = Path(os.environ["HOME"])
@@ -438,6 +476,15 @@ def _finish_pending(state: PendingState, home: Path) -> bool:
 
 
 def issue(domain: str) -> int:
+    try:
+        with operation_lock():
+            return _issue_locked(domain)
+    except LockFailure as error:
+        log.error("%s", error)
+        return 1
+
+
+def _issue_locked(domain: str) -> int:
     domains = _load_domains(HAPROXY_HOSTS_MAP)
 
     if domain not in domains:

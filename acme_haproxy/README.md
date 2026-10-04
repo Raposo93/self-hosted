@@ -45,6 +45,15 @@ The HAProxy host map is the source of truth for domains managed by this tool.
 
 A domain must exist in the map before a certificate can be issued for it.
 
+`issue` and `renew` share an exclusive file lock at
+`/etc/haproxy/certs/acme/.acme-haproxy.lock`. A second invocation, including a
+manual command while the service runs, waits for the first to finish. It then
+reads the latest pending state before doing any certificate work. The lock file
+remains on disk; the operating system releases the lock when the process exits,
+including after an error. Do not delete the lock file while an operation runs.
+If the lock cannot be opened or acquired, the command reports an error and exits
+non-zero.
+
 ## Commands
 
 ### Issue a certificate
