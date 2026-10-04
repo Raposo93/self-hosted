@@ -172,6 +172,8 @@ BACKUP_ATTEMPTED=false
 CLIENT_PID=""
 CANCEL_EXIT=0
 
+# ShellCheck cannot see calls made by the signal traps below.
+# shellcheck disable=SC2317
 cancel_backup() {
     local signal="$1" status="$2"
     if [[ "$CANCEL_EXIT" -eq 0 ]]; then
