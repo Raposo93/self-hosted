@@ -2,9 +2,77 @@
 """Rename video files as Jellyfin series episodes."""
 
 import argparse
+import json
+import os
 from pathlib import Path
 
 VIDEO_EXTS = {".mkv", ".mp4", ".avi"}
+LOG_NAME = "rename.log"
+
+
+def exists(path: Path) -> bool:
+    """Include broken symlinks when checking for filename conflicts."""
+    return os.path.lexists(path)
+
+
+def undo(path: Path, parser: argparse.ArgumentParser) -> int:
+    log_path = path / LOG_NAME
+    if not log_path.is_file():
+        parser.error(f"no rename log found: {log_path}")
+
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    if not lines or lines[-1] == "# undone":
+        parser.error("no applied operation to undo")
+    if lines[-1] != "# applied":
+        parser.error("rename log has no complete latest operation to undo")
+
+    starts = [line for line in lines if line.startswith("# apply ")]
+    if not starts:
+        parser.error("rename log has no operation boundaries; older renames cannot be undone safely")
+    try:
+        changes = json.loads(starts[-1][len("# apply "):])
+        if not isinstance(changes, list) or not changes:
+            raise ValueError("empty or invalid operation")
+        for change in changes:
+            if (not isinstance(change, dict) or
+                    set(change) != {"source", "target", "dev", "ino"} or
+                    any(not isinstance(change[key], str) or
+                        change[key] in {".", ".."} or
+                        Path(change[key]).name != change[key]
+                        for key in ("source", "target")) or
+                    not all(isinstance(change[key], int) for key in ("dev", "ino"))):
+                raise ValueError("invalid rename entry")
+    except (json.JSONDecodeError, ValueError, TypeError) as exc:
+        parser.error(f"invalid rename log: {exc}")
+    if (len({change["source"] for change in changes}) != len(changes) or
+            len({change["target"] for change in changes}) != len(changes) or
+            any(change["source"] == change["target"] for change in changes)):
+        parser.error("invalid rename log: duplicate or unchanged names")
+
+    problems = []
+    for change in changes:
+        source = path / change["source"]
+        target = path / change["target"]
+        if exists(source):
+            problems.append(f"original name already exists: {source}")
+        try:
+            stat = target.lstat()
+        except FileNotFoundError:
+            problems.append(f"renamed file is missing: {target}")
+        else:
+            if (stat.st_dev, stat.st_ino) != (change["dev"], change["ino"]):
+                problems.append(f"renamed file has changed: {target}")
+    if problems:
+        parser.error("cannot undo:\n  " + "\n  ".join(problems))
+
+    with log_path.open("a", encoding="utf-8") as log:
+        for change in reversed(changes):
+            source = path / change["source"]
+            target = path / change["target"]
+            target.rename(source)
+            print(f"{target.name} -> {source.name}")
+        log.write("# undone\n")
+    return 0
 
 
 def positive_int(value: str) -> int:
@@ -16,10 +84,12 @@ def positive_int(value: str) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Rename series episodes for Jellyfin")
+    parser.add_argument("directory", type=Path, nargs="?", help="Directory containing the videos")
+    parser.add_argument("series", nargs="?", help="Series name")
     parser.add_argument(
-        "--path", type=Path, required=True, help="Directory containing the videos"
+        "--path", type=Path, help="Directory containing the videos"
     )
-    parser.add_argument("--series-name", required=True, help="Series name")
+    parser.add_argument("--series-name", help="Series name")
     parser.add_argument(
         "--season", type=positive_int, default=1, help="Season number (default: 1)"
     )
@@ -29,20 +99,30 @@ def main() -> int:
         default=1,
         help="First episode number (default: 1)",
     )
-    parser.add_argument(
-        "--apply", action="store_true", help="Rename files (default: preview only)"
-    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--apply", action="store_true", help="Rename files (default: preview only)")
+    mode.add_argument("--undo", action="store_true", help="Undo the last applied rename")
     args = parser.parse_args()
 
-    if not args.path.is_dir():
-        parser.error(f"cannot access directory: {args.path}")
-    if not args.series_name.strip() or Path(args.series_name).name != args.series_name:
+    if args.directory is not None and args.path is not None:
+        parser.error("specify the directory either positionally or with --path")
+    if args.series is not None and args.series_name is not None:
+        parser.error("specify the series either positionally or with --series-name")
+    path = args.path or args.directory
+    series_name = args.series_name or args.series
+    if path is None or not path.is_dir():
+        parser.error(f"cannot access directory: {path}")
+    if args.undo:
+        if series_name is not None:
+            parser.error("--undo does not take a series name")
+        return undo(path, parser)
+    if series_name is None or not series_name.strip() or Path(series_name).name != series_name:
         parser.error("series name must be a valid file name")
 
     files = sorted(
         (
             f
-            for f in args.path.iterdir()
+            for f in path.iterdir()
             if f.is_file() and f.suffix.lower() in VIDEO_EXTS
         ),
         key=lambda f: f.name.casefold(),
@@ -51,14 +131,14 @@ def main() -> int:
         (
             source,
             source.with_name(
-                f"{args.series_name} s{args.season:02d}e{episode:02d}{source.suffix}"
+                f"{series_name} s{args.season:02d}e{episode:02d}{source.suffix}"
             ),
         )
         for episode, source in enumerate(files, start=args.start)
     ]
 
     collisions = [
-        target for source, target in changes if target != source and target.exists()
+        target for source, target in changes if target != source and exists(target)
     ]
     if collisions:
         parser.error(
@@ -72,12 +152,26 @@ def main() -> int:
         print("Preview only: no files were changed. Use --apply to rename them.")
         return 0
 
-    if changes:
-        with (args.path / "rename.log").open("a", encoding="utf-8") as log:
-            for source, target in changes:
-                if source != target:
-                    source.rename(target)
-                    log.write(f"{source.name} -> {target.name}\n")
+    changed = [(source, target) for source, target in changes if source != target]
+    if changed:
+        log_path = path / LOG_NAME
+        if log_path.is_file():
+            lines = log_path.read_text(encoding="utf-8").splitlines()
+            if any(line.startswith("# apply ") for line in lines) and lines[-1] not in {"# applied", "# undone"}:
+                parser.error("rename log contains an incomplete operation; inspect it before applying again")
+        record = [
+            {"source": source.name, "target": target.name,
+             "dev": source.lstat().st_dev, "ino": source.lstat().st_ino}
+            for source, target in changed
+        ]
+        with log_path.open("a", encoding="utf-8") as log:
+            log.write("# apply " + json.dumps(record, ensure_ascii=False) + "\n")
+            log.flush()
+            for source, target in changed:
+                source.rename(target)
+                log.write(f"{source.name} -> {target.name}\n")
+                log.flush()
+            log.write("# applied\n")
     return 0
 
 

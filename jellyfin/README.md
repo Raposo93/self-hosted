@@ -12,10 +12,17 @@ does not search subdirectories.
 ```sh
 python3 jellyfin/tools/rename-series.py --path /path/to/season --series-name "My Series" --season 1
 python3 jellyfin/tools/rename-series.py --path /path/to/season --series-name "My Series" --season 1 --apply
+python3 jellyfin/tools/rename-series.py --path /path/to/season --undo
 ```
 
 The first command only previews the changes and creates no files. `--apply`
 renames the videos and appends completed changes to `rename.log` in the same
-directory. Use `--start` to set the first episode number. The script rejects
-nonpositive numbers and existing destination files; review the preview before
-applying it.
+directory. `--undo` restores the original names from the most recent applied
+operation. It checks every recorded file and original name first; missing,
+replaced, or conflicting files stop the entire undo without overwriting data.
+Only the latest operation can be undone. Older log entries without operation
+boundaries remain in the log but cannot be undone safely by the script.
+
+The directory and series name may also be given as positional arguments. Use
+`--start` to set the first episode number. The script rejects nonpositive
+numbers and existing destination files; review the preview before applying it.
