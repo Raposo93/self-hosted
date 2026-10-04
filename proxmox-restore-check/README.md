@@ -109,6 +109,19 @@ A restore failure before configuration creation can leave orphan volumes: inspec
 storage after such failures. Abrupt power loss, SIGKILL or host failure cannot
 guarantee cleanup; the next run refuses an occupied temporary ID.
 
+On SIGTERM or Ctrl-C, the current CLI process group is stopped and waited for
+before cleanup. The same temporary-ID and disk-reference checks still apply.
+The current guest is reported as failed, remaining guests are skipped, and the
+script attempts one failure-summary email. It returns non-zero and does not
+power off automatically after cancellation, leaving the node available for
+inspection. A failed cleanup is reported as requiring manual intervention.
+The example unit uses `KillMode=mixed` so systemd signals the Python process
+first and gives it time to stop CLI workers and clean up. `TimeoutStopSec=10min`
+bounds that work before systemd force-kills the service; adapt the limit if
+your storage needs longer. These steps cannot guarantee cleanup after SIGKILL,
+power loss, a stuck PVE server-side task, or a cleanup error. Inspect PVE task
+logs and target storage before retrying if cancellation interrupts a restore.
+
 Exit 0 means no failed/skipped guest and successful mail submission (warnings
 are allowed); exit 1 also covers mail or poweroff failure. SMTP failure never
 turns a failed drill into success. The summary is printed before mail, and mail

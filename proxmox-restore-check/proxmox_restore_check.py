@@ -19,6 +19,50 @@ class Failure(RuntimeError):
     pass
 
 
+class Cancelled(Exception):
+    pass
+
+
+class Cancellation:
+    def __init__(self) -> None:
+        self.reason: str | None = None
+        self.cleaning = False
+        self.previous = {
+            signum: signal.getsignal(signum)
+            for signum in (signal.SIGTERM, signal.SIGINT)
+        }
+
+    def handle(self, signum: int, _frame: object) -> None:
+        if self.reason is None:
+            self.reason = signal.Signals(signum).name
+            if not self.cleaning:
+                raise Cancelled(self.reason)
+
+    def __enter__(self) -> "Cancellation":  # noqa: PYI034 - Python 3.10 lacks Self
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            signal.signal(signum, self.handle)
+        return self
+
+    def __exit__(self, _type: object, _value: object, _traceback: object) -> None:
+        for signum, handler in self.previous.items():
+            signal.signal(signum, handler)
+
+
+def stop_command(process: subprocess.Popen[str]) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        process.communicate(timeout=10)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.communicate()
+
+
 def command(args: list[str], timeout: float = 60, body: str | None = None) -> str:
     # Kill the entire CLI process group before cleanup, including restore workers.
     with subprocess.Popen(
@@ -31,6 +75,9 @@ def command(args: list[str], timeout: float = 60, body: str | None = None) -> st
     ) as process:
         try:
             output, _ = process.communicate(body, timeout=timeout)
+        except Cancelled:
+            stop_command(process)
+            raise
         except subprocess.TimeoutExpired:
             os.killpg(process.pid, signal.SIGKILL)
             process.communicate()
@@ -244,8 +291,9 @@ def normalize_vm_cpus(
 
 
 class Runner:
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, cancellation: Cancellation | None = None):
         self.config = config
+        self.cancellation = cancellation or Cancellation()
         self.base = Path("/etc/pve")
 
     def paths(self) -> list[Path]:
@@ -284,6 +332,7 @@ class Runner:
         details = [f"{guest.kind}/{guest.source_id} {guest.name}"]
         status, safe = "OK", True
         owned = False
+        cancelled = False
         try:
             if any(p.exists() for p in self.paths()):
                 return "FAIL", details[0] + ": temporary ID occupied", False
@@ -367,12 +416,16 @@ class Runner:
             )
             if guest.kind == "vm" and not guest.agent:
                 status = "WARN"
+        except Cancelled as error:
+            status, cancelled = "FAIL", True
+            details.append(f"Cancelled: {error}")
         except (Failure, OSError, ValueError, KeyError) as error:
             status = "FAIL"
             details.append(str(error))
         finally:
-            if owned and path.exists():
-                try:
+            self.cancellation.cleaning = True
+            try:
+                if owned and path.exists():
                     # Never run backup hooks during stop/destroy, even after partial restore.
                     lines = path.read_text().splitlines()
                     # Refuse destruction if partial restore retained foreign disk references.
@@ -389,9 +442,7 @@ class Runner:
                                 value.strip(),
                             )
                         ):
-                            raise Failure(
-                                "Foreign disk reference; manual cleanup required"
-                            )
+                            raise Failure("Foreign disk reference")
                     path.write_text(
                         "\n".join(
                             line
@@ -407,28 +458,44 @@ class Runner:
                     if any(p.exists() for p in self.paths()):
                         raise Failure("Temporary configuration still exists")
                     details.append("Cleanup: OK")
-                except (Failure, OSError) as error:
+                elif owned:
                     status, safe = "FAIL", False
-                    details.append(f"Cleanup: {error}; remaining guests skipped")
-            elif owned:
+                    details.append(
+                        "No restored configuration; inspect orphan volumes before retrying"
+                    )
+            except (Failure, OSError) as error:
                 status, safe = "FAIL", False
-                details.append(
-                    "No restored configuration; inspect orphan volumes before retrying"
-                )
+                details.append(f"Cleanup: {error}; manual intervention required")
+            finally:
+                self.cancellation.cleaning = False
+        if self.cancellation.reason is not None:
+            if not cancelled:
+                details.append(f"Cancelled: {self.cancellation.reason}")
+            raise Cancelled("\n".join(details))
         return status, "\n".join(details), safe
 
 
 def run(config: Config, no_poweroff: bool) -> int:
-    runner = Runner(config)
+    cancellation = Cancellation()
+    runner = Runner(config, cancellation)
     runner.preflight()  # Never power off/report on wrong host or ID collision.
     results: list[tuple[str, str]] = []
     safe = True
-    for guest in config.guests:
-        if not safe:
-            results.append(("SKIP", f"{guest.kind}/{guest.source_id}: unsafe cleanup"))
-            continue
-        status, details, safe = runner.test(guest)
-        results.append((status, details))
+    with cancellation:
+        for guest in config.guests:
+            if cancellation.reason is not None:
+                results.append(("SKIP", f"{guest.kind}/{guest.source_id}: cancelled"))
+                continue
+            if not safe:
+                results.append(
+                    ("SKIP", f"{guest.kind}/{guest.source_id}: unsafe cleanup")
+                )
+                continue
+            try:
+                status, details, safe = runner.test(guest)
+                results.append((status, details))
+            except Cancelled as error:
+                results.append(("FAIL", str(error)))
     totals = Counter(status for status, _ in results)
     summary = ", ".join(
         f"{key}={totals[key]}" for key in ("OK", "WARN", "FAIL", "SKIP")
@@ -439,7 +506,7 @@ def run(config: Config, no_poweroff: bool) -> int:
         + "\n\n".join(f"{status}\n{details}" for status, details in results)
     )
     print(report, flush=True)
-    result = int(bool(totals["FAIL"] or totals["SKIP"]))
+    result = int(bool(totals["FAIL"] or totals["SKIP"] or cancellation.reason))
     notifier = Path(__file__).resolve().parent.parent / "mail-notifier" / "send-mail.sh"
     try:
         command(
@@ -456,7 +523,7 @@ def run(config: Config, no_poweroff: bool) -> int:
     except (Failure, OSError):
         print("Summary mail failed; report remains in journal", flush=True)
         result = 1
-    if config.poweroff and not no_poweroff:
+    if config.poweroff and not no_poweroff and cancellation.reason is None:
         try:
             command(["systemctl", "poweroff"])
         except (Failure, OSError):
@@ -475,7 +542,7 @@ def main() -> int:
         with Path("/run/proxmox-restore-check.lock").open("w") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             return run(config, args.no_poweroff)
-    except (Failure, OSError, ValueError, TypeError, KeyError) as error:
+    except (Failure, Cancelled, OSError, ValueError, TypeError, KeyError) as error:
         print(f"Restore check refused/failed: {error}", flush=True)
         return 1
 

@@ -7,6 +7,8 @@ ConditionPathExists=/etc/proxmox-restore-check.json
 [Service]
 Type=oneshot
 User=root
+KillMode=mixed
+TimeoutStopSec=10min
 WorkingDirectory=/path/to/self-hosted/proxmox-restore-check
 ExecStart=/usr/bin/python3 /path/to/self-hosted/proxmox-restore-check/proxmox_restore_check.py --config /etc/proxmox-restore-check.json
 TimeoutStartSec=infinity
