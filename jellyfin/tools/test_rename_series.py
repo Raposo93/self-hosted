@@ -1,8 +1,10 @@
 """Focused safety checks for the series renamer."""
 
+import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -65,6 +67,35 @@ class RenameSeriesTests(unittest.TestCase):
         result = self.run_script("--undo")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("renamed file has changed", result.stderr)
+        self.assertTrue((self.path / "Show s01e01.mkv").exists())
+
+    def test_changed_content_with_same_inode_size_and_mtime_aborts(self):
+        self.apply()
+        renamed = self.path / "Show s01e01.mkv"
+        before = renamed.stat()
+        time.sleep(0.02)
+        renamed.write_text("z", encoding="utf-8")
+        os.utime(renamed, ns=(before.st_atime_ns, before.st_mtime_ns))
+        after = renamed.stat()
+        self.assertEqual(
+            (before.st_ino, before.st_size, before.st_mtime_ns),
+            (after.st_ino, after.st_size, after.st_mtime_ns),
+        )
+        self.assertNotEqual(before.st_ctime_ns, after.st_ctime_ns)
+        result = self.run_script("--undo")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("renamed file has changed", result.stderr)
+        self.assertFalse((self.path / "a.mkv").exists())
+
+    def test_older_log_without_timestamps_cannot_undo_automatically(self):
+        self.apply()
+        log = self.path / "rename.log"
+        lines = log.read_text(encoding="utf-8").splitlines()
+        lines[-1] = "# applied"
+        log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        result = self.run_script("--undo")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("no file timestamps", result.stderr)
         self.assertTrue((self.path / "Show s01e01.mkv").exists())
 
     def test_last_apply_survives_later_preview(self):

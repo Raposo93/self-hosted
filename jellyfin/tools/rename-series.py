@@ -23,7 +23,11 @@ def undo(path: Path, parser: argparse.ArgumentParser) -> int:
     lines = log_path.read_text(encoding="utf-8").splitlines()
     if not lines or lines[-1] == "# undone":
         parser.error("no applied operation to undo")
-    if lines[-1] != "# applied":
+    if lines[-1] == "# applied":
+        parser.error(
+            "last operation has no file timestamps; undo it manually from rename.log"
+        )
+    if not lines[-1].startswith("# applied "):
         parser.error("rename log has no complete latest operation to undo")
 
     starts = [line for line in lines if line.startswith("# apply ")]
@@ -32,22 +36,32 @@ def undo(path: Path, parser: argparse.ArgumentParser) -> int:
             "rename log has no operation boundaries; older renames cannot be undone safely"
         )
     try:
-        changes = json.loads(starts[-1][len("# apply ") :])
+        changes = json.loads(lines[-1][len("# applied ") :])
         if not isinstance(changes, list) or not changes:
             raise ValueError("empty or invalid operation")
         for change in changes:
             if (
                 not isinstance(change, dict)
-                or set(change) != {"source", "target", "dev", "ino"}
+                or set(change)
+                != {"source", "target", "dev", "ino", "size", "mtime_ns", "ctime_ns"}
                 or any(
                     not isinstance(change[key], str)
                     or change[key] in {".", ".."}
                     or Path(change[key]).name != change[key]
                     for key in ("source", "target")
                 )
-                or not all(isinstance(change[key], int) for key in ("dev", "ino"))
+                or not all(
+                    isinstance(change[key], int)
+                    for key in ("dev", "ino", "size", "mtime_ns", "ctime_ns")
+                )
             ):
                 raise ValueError("invalid rename entry")
+        started = json.loads(starts[-1][len("# apply ") :])
+        if started != [
+            {"source": change["source"], "target": change["target"]}
+            for change in changes
+        ]:
+            raise ValueError("operation boundaries do not match")
     except (json.JSONDecodeError, ValueError, TypeError) as exc:
         parser.error(f"invalid rename log: {exc}")
     if (
@@ -68,7 +82,13 @@ def undo(path: Path, parser: argparse.ArgumentParser) -> int:
         except FileNotFoundError:
             problems.append(f"renamed file is missing: {target}")
         else:
-            if (stat.st_dev, stat.st_ino) != (change["dev"], change["ino"]):
+            if (
+                stat.st_dev != change["dev"]
+                or stat.st_ino != change["ino"]
+                or stat.st_size != change["size"]
+                or stat.st_mtime_ns != change["mtime_ns"]
+                or stat.st_ctime_ns != change["ctime_ns"]
+            ):
                 problems.append(f"renamed file has changed: {target}")
     if problems:
         parser.error("cannot undo:\n  " + "\n  ".join(problems))
@@ -169,21 +189,15 @@ def main() -> int:
         log_path = path / LOG_NAME
         if log_path.is_file():
             lines = log_path.read_text(encoding="utf-8").splitlines()
-            if any(line.startswith("# apply ") for line in lines) and lines[-1] not in {
-                "# applied",
-                "# undone",
-            }:
+            if any(line.startswith("# apply ") for line in lines) and not (
+                lines[-1] in {"# applied", "# undone"}
+                or lines[-1].startswith("# applied ")
+            ):
                 parser.error(
                     "rename log contains an incomplete operation; inspect it before applying again"
                 )
         record = [
-            {
-                "source": source.name,
-                "target": target.name,
-                "dev": source.lstat().st_dev,
-                "ino": source.lstat().st_ino,
-            }
-            for source, target in changed
+            {"source": source.name, "target": target.name} for source, target in changed
         ]
         with log_path.open("a", encoding="utf-8") as log:
             log.write("# apply " + json.dumps(record, ensure_ascii=False) + "\n")
@@ -192,7 +206,21 @@ def main() -> int:
                 source.rename(target)
                 log.write(f"{source.name} -> {target.name}\n")
                 log.flush()
-            log.write("# applied\n")
+            completed = []
+            for source, target in changed:
+                stat = target.lstat()
+                completed.append(
+                    {
+                        "source": source.name,
+                        "target": target.name,
+                        "dev": stat.st_dev,
+                        "ino": stat.st_ino,
+                        "size": stat.st_size,
+                        "mtime_ns": stat.st_mtime_ns,
+                        "ctime_ns": stat.st_ctime_ns,
+                    }
+                )
+            log.write("# applied " + json.dumps(completed, ensure_ascii=False) + "\n")
     return 0
 
 

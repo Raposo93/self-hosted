@@ -149,6 +149,9 @@ if ((${#PYTHON_SCRIPTS[@]} > 0)); then
     if [[ -d ssh-client-setup/tests ]]; then
         "$PROJECT_PYTHON" -m unittest discover -s ssh-client-setup/tests -v
     fi
+    if [[ -f jellyfin/tools/test_rename_series.py ]]; then
+        "$PROJECT_PYTHON" -m unittest discover -s jellyfin/tools -p test_rename_series.py -v
+    fi
     echo "Checking Python lint, formatting, and types..."
     "$PROJECT_PYTHON" -m ruff check .
     "$PROJECT_PYTHON" -m ruff format --check .
