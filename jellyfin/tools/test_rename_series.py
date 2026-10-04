@@ -6,7 +6,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 SCRIPT = Path(__file__).with_name("rename-series.py")
 
 
@@ -85,8 +84,15 @@ class RenameSeriesTests(unittest.TestCase):
 
     def test_old_option_interface_still_works(self):
         result = subprocess.run(
-            [sys.executable, str(SCRIPT), "--path", str(self.path),
-             "--series-name", "Show", "--apply"],
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--path",
+                str(self.path),
+                "--series-name",
+                "Show",
+                "--apply",
+            ],
             text=True,
             capture_output=True,
             check=False,

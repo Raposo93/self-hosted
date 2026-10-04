@@ -28,25 +28,33 @@ def undo(path: Path, parser: argparse.ArgumentParser) -> int:
 
     starts = [line for line in lines if line.startswith("# apply ")]
     if not starts:
-        parser.error("rename log has no operation boundaries; older renames cannot be undone safely")
+        parser.error(
+            "rename log has no operation boundaries; older renames cannot be undone safely"
+        )
     try:
-        changes = json.loads(starts[-1][len("# apply "):])
+        changes = json.loads(starts[-1][len("# apply ") :])
         if not isinstance(changes, list) or not changes:
             raise ValueError("empty or invalid operation")
         for change in changes:
-            if (not isinstance(change, dict) or
-                    set(change) != {"source", "target", "dev", "ino"} or
-                    any(not isinstance(change[key], str) or
-                        change[key] in {".", ".."} or
-                        Path(change[key]).name != change[key]
-                        for key in ("source", "target")) or
-                    not all(isinstance(change[key], int) for key in ("dev", "ino"))):
+            if (
+                not isinstance(change, dict)
+                or set(change) != {"source", "target", "dev", "ino"}
+                or any(
+                    not isinstance(change[key], str)
+                    or change[key] in {".", ".."}
+                    or Path(change[key]).name != change[key]
+                    for key in ("source", "target")
+                )
+                or not all(isinstance(change[key], int) for key in ("dev", "ino"))
+            ):
                 raise ValueError("invalid rename entry")
     except (json.JSONDecodeError, ValueError, TypeError) as exc:
         parser.error(f"invalid rename log: {exc}")
-    if (len({change["source"] for change in changes}) != len(changes) or
-            len({change["target"] for change in changes}) != len(changes) or
-            any(change["source"] == change["target"] for change in changes)):
+    if (
+        len({change["source"] for change in changes}) != len(changes)
+        or len({change["target"] for change in changes}) != len(changes)
+        or any(change["source"] == change["target"] for change in changes)
+    ):
         parser.error("invalid rename log: duplicate or unchanged names")
 
     problems = []
@@ -84,11 +92,11 @@ def positive_int(value: str) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Rename series episodes for Jellyfin")
-    parser.add_argument("directory", type=Path, nargs="?", help="Directory containing the videos")
-    parser.add_argument("series", nargs="?", help="Series name")
     parser.add_argument(
-        "--path", type=Path, help="Directory containing the videos"
+        "directory", type=Path, nargs="?", help="Directory containing the videos"
     )
+    parser.add_argument("series", nargs="?", help="Series name")
+    parser.add_argument("--path", type=Path, help="Directory containing the videos")
     parser.add_argument("--series-name", help="Series name")
     parser.add_argument(
         "--season", type=positive_int, default=1, help="Season number (default: 1)"
@@ -100,8 +108,12 @@ def main() -> int:
         help="First episode number (default: 1)",
     )
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--apply", action="store_true", help="Rename files (default: preview only)")
-    mode.add_argument("--undo", action="store_true", help="Undo the last applied rename")
+    mode.add_argument(
+        "--apply", action="store_true", help="Rename files (default: preview only)"
+    )
+    mode.add_argument(
+        "--undo", action="store_true", help="Undo the last applied rename"
+    )
     args = parser.parse_args()
 
     if args.directory is not None and args.path is not None:
@@ -116,15 +128,15 @@ def main() -> int:
         if series_name is not None:
             parser.error("--undo does not take a series name")
         return undo(path, parser)
-    if series_name is None or not series_name.strip() or Path(series_name).name != series_name:
+    if (
+        series_name is None
+        or not series_name.strip()
+        or Path(series_name).name != series_name
+    ):
         parser.error("series name must be a valid file name")
 
     files = sorted(
-        (
-            f
-            for f in path.iterdir()
-            if f.is_file() and f.suffix.lower() in VIDEO_EXTS
-        ),
+        (f for f in path.iterdir() if f.is_file() and f.suffix.lower() in VIDEO_EXTS),
         key=lambda f: f.name.casefold(),
     )
     changes = [
@@ -157,11 +169,20 @@ def main() -> int:
         log_path = path / LOG_NAME
         if log_path.is_file():
             lines = log_path.read_text(encoding="utf-8").splitlines()
-            if any(line.startswith("# apply ") for line in lines) and lines[-1] not in {"# applied", "# undone"}:
-                parser.error("rename log contains an incomplete operation; inspect it before applying again")
+            if any(line.startswith("# apply ") for line in lines) and lines[-1] not in {
+                "# applied",
+                "# undone",
+            }:
+                parser.error(
+                    "rename log contains an incomplete operation; inspect it before applying again"
+                )
         record = [
-            {"source": source.name, "target": target.name,
-             "dev": source.lstat().st_dev, "ino": source.lstat().st_ino}
+            {
+                "source": source.name,
+                "target": target.name,
+                "dev": source.lstat().st_dev,
+                "ino": source.lstat().st_ino,
+            }
             for source, target in changed
         ]
         with log_path.open("a", encoding="utf-8") as log:
