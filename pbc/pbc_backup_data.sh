@@ -96,7 +96,7 @@ if [[ -n "${INCLUDE_DEV_MOUNTS:-}" ]]; then
             exit 1
         fi
         included_real="$(realpath -e -- "$included")"
-        if [[ "$included_real" != "$SOURCE_REAL/"* ]]; then
+        if [[ "$included_real" != "${SOURCE_REAL%/}/"* ]]; then
             echo "Error: INCLUDE_DEV_MOUNTS entry is outside SOURCE_DIR: $included" >&2
             exit 1
         fi

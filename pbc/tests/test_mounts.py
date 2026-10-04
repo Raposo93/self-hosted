@@ -134,6 +134,28 @@ class MountTests(unittest.TestCase):
             self.run_backup(INCLUDE_DEV_MOUNTS=str(nested)), "not mounted"
         )
 
+    def test_root_source_accepts_mounted_include(self):
+        mounts = {"/": "root", str(self.mount): "disk"}
+        result = self.run_backup(
+            SOURCE_DIR="/",
+            INCLUDE_DEV_MOUNTS=str(self.mount),
+            FAKE_MOUNTS=json.dumps(mounts),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        args = json.loads(self.calls.read_text())
+        self.assertEqual(
+            [args[i + 1] for i, arg in enumerate(args) if arg == "--include-dev"],
+            [str(self.mount)],
+        )
+
+    def test_include_outside_nonroot_source_is_rejected(self):
+        outside = self.base / "outside"
+        outside.mkdir()
+        self.assert_rejected(
+            self.run_backup(INCLUDE_DEV_MOUNTS=str(outside)),
+            "outside SOURCE_DIR",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
