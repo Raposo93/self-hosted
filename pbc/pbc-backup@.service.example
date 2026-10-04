@@ -5,6 +5,8 @@ After=network-online.target
 
 [Service]
 Type=oneshot
+KillMode=control-group
+TimeoutStopSec=5min
 WorkingDirectory=/path/to/self-hosted/pbc
 EnvironmentFile=/path/to/self-hosted/pbc/.env.%i
 

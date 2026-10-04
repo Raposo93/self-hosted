@@ -169,6 +169,22 @@ PRE_EXIT=0
 POST_EXIT=0
 PBC_EXIT=0
 BACKUP_ATTEMPTED=false
+CLIENT_PID=""
+CANCEL_EXIT=0
+
+cancel_backup() {
+    local signal="$1" status="$2"
+    if [[ "$CANCEL_EXIT" -eq 0 ]]; then
+        CANCEL_EXIT="$status"
+        log "Backup cancelled by $signal"
+    fi
+    if [[ -n "$CLIENT_PID" ]]; then
+        kill -TERM "$CLIENT_PID" 2>/dev/null || true
+    fi
+}
+
+trap 'cancel_backup SIGTERM 143' TERM
+trap 'cancel_backup SIGINT 130' INT
 
 if [[ -n "${PRE_BACKUP_HOOK:-}" && ( ! -f "$PRE_BACKUP_HOOK" || ! -x "$PRE_BACKUP_HOOK" ) ]]; then
     log "Error: Pre-backup hook is not an executable file: $PRE_BACKUP_HOOK"
@@ -188,30 +204,38 @@ else
     fi
 
     if [[ "$PRE_EXIT" -eq 0 ]]; then
-        if [[ -n "${HEALTHCHECK_URL:-}" ]]; then
+        if [[ "$CANCEL_EXIT" -eq 0 && -n "${HEALTHCHECK_URL:-}" ]]; then
             report_health start
         fi
 
-        BACKUP_ATTEMPTED=true
-        if proxmox-backup-client backup "$BACKUP_NAME:$SOURCE_DIR" \
-            --repository "$REPO" \
-            "${BACKUP_ID_ARGS[@]}" \
-            "${NAMESPACE_ARGS[@]}" \
-            "${ENCRYPTION_ARGS[@]}" \
-            "${INCLUDE_DEV_ARGS[@]}" \
-            --change-detection-mode metadata \
-            --skip-e2big-xattr \
-            >> "$LOGFILE" 2>&1; then
-            PBC_EXIT=0
-        else
-            PBC_EXIT=$?
-        fi
-
-        if [[ -n "${HEALTHCHECK_URL:-}" ]]; then
-            if [[ "$PBC_EXIT" -eq 0 ]]; then
-                report_health success
-            else
-                report_health fail
+        if [[ "$CANCEL_EXIT" -eq 0 ]]; then
+            BACKUP_ATTEMPTED=true
+            proxmox-backup-client backup "$BACKUP_NAME:$SOURCE_DIR" \
+                --repository "$REPO" \
+                "${BACKUP_ID_ARGS[@]}" \
+                "${NAMESPACE_ARGS[@]}" \
+                "${ENCRYPTION_ARGS[@]}" \
+                "${INCLUDE_DEV_ARGS[@]}" \
+                --change-detection-mode metadata \
+                --skip-e2big-xattr \
+                >> "$LOGFILE" 2>&1 &
+            CLIENT_PID=$!
+            while true; do
+                if wait "$CLIENT_PID"; then
+                    PBC_EXIT=0
+                    break
+                else
+                    PBC_EXIT=$?
+                    # A trapped signal interrupts wait before the client exits.
+                    if kill -0 "$CLIENT_PID" 2>/dev/null; then
+                        continue
+                    fi
+                    break
+                fi
+            done
+            CLIENT_PID=""
+            if [[ "$CANCEL_EXIT" -ne 0 ]]; then
+                PBC_EXIT="$CANCEL_EXIT"
             fi
         fi
 
@@ -222,6 +246,14 @@ else
             else
                 POST_EXIT=$?
                 log "Post-backup hook exit code: $POST_EXIT"
+            fi
+        fi
+
+        if [[ -n "${HEALTHCHECK_URL:-}" ]]; then
+            if [[ "$PBC_EXIT" -eq 0 && "$CANCEL_EXIT" -eq 0 ]]; then
+                report_health success
+            else
+                report_health fail
             fi
         fi
     fi
@@ -236,7 +268,9 @@ else
     log "Backup not started"
 fi
 STATUS=0
-if [[ "$PRE_EXIT" -ne 0 ]]; then
+if [[ "$CANCEL_EXIT" -ne 0 ]]; then
+    STATUS="$CANCEL_EXIT"
+elif [[ "$PRE_EXIT" -ne 0 ]]; then
     STATUS="$PRE_EXIT"
 elif [[ "$PBC_EXIT" -ne 0 ]]; then
     STATUS="$PBC_EXIT"

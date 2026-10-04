@@ -222,7 +222,8 @@ journalctl -u pbc-backup@example-profile.service
 Set `HEALTHCHECK_URL` in a private profile file to a Healthchecks-compatible
 ping URL, for example `https://monitor.example.com/ping/your-private-id`.
 Immediately before PBC starts, the script sends a ping to `<url>/start`.
-After PBC finishes, it pings `<url>` on success or `<url>/fail` on failure.
+After PBC and any post-hook finish, it pings `<url>` on PBC success or
+`<url>/fail` on PBC failure or cancellation.
 The monitoring service must be configured with an expected period and grace
 time matching the profile's timer to detect missed runs. No requests are sent
 when the URL is unset or empty. These pings complement the existing email
@@ -248,6 +249,18 @@ the service returns the PBC exit code while logging both failures. If only
 the post-hook fails, the service returns its exit code. Healthcheck pings
 describe the PBC attempt; a pre-hook failure sends no ping, and post-hook
 failure does not change the PBC outcome ping. Email reports the overall run.
+
+On SIGTERM or SIGINT during a backup, the script requests client termination,
+waits for it to exit, and then runs the post-hook once if the pre-hook succeeded.
+Cancellation returns a non-zero status and is reported as a failure, including
+when the post-hook also fails. The example systemd service uses
+`KillMode=control-group`, so systemd signals the script and its running
+client together. `TimeoutStopSec=5min` gives the client and post-hook time to
+finish before systemd forces termination; adjust it for profiles whose cleanup
+needs longer. A client that leaves detached processes may need its own stop
+handling before a post-hook can safely remove data they use. SIGKILL, power
+loss, and an interrupted pre-hook cannot guarantee recovery; a partially run
+pre-hook does not trigger the post-hook unless it completed successfully.
 
 ### Fixed daily schedule
 
