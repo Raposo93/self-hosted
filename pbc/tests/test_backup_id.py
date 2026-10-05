@@ -3,11 +3,12 @@
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[1] / "pbc_backup_data.sh"
+SCRIPT = Path(__file__).resolve().parents[1] / "pbc_backup_data.py"
 
 
 class BackupIdTests(unittest.TestCase):
@@ -43,14 +44,15 @@ class BackupIdTests(unittest.TestCase):
             "MSMTP_ACCOUNT": "default",
         }
 
-    def run_backup(self, backup_id=None, namespace=None):
+    def run_backup(self, backup_id=None, namespace=None, **settings):
         environment = self.environment.copy()
         if backup_id is not None:
             environment["BACKUP_ID"] = backup_id
         if namespace is not None:
             environment["NAMESPACE"] = namespace
+        environment.update(settings)
         return subprocess.run(
-            ["bash", str(SCRIPT)],
+            [sys.executable, str(SCRIPT)],
             env=environment,
             capture_output=True,
             text=True,
@@ -89,6 +91,27 @@ class BackupIdTests(unittest.TestCase):
         self.assertNotIn("--ns", calls[0])
         self.assertNotIn("--ns", calls[1])
         self.assertEqual(calls[2][calls[2].index("--ns") + 1], "team backups")
+
+    def test_encryption_key_and_systemd_credential_are_preserved(self):
+        credentials = self.base / "credentials"
+        credentials.mkdir()
+        (credentials / "proxmox-backup-client.encryption-password").write_text(
+            "fake credential"
+        )
+        keyfile = self.base / "key.json"
+        keyfile.write_text("fake key")
+        result = self.run_backup(
+            CREDENTIALS_DIRECTORY=str(credentials), ENCRYPTION_KEYFILE=str(keyfile)
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        call = json.loads(self.calls.read_text())
+        self.assertEqual(call[call.index("--keyfile") + 1], str(keyfile))
+
+        self.calls.unlink()
+        result = self.run_backup(ENCRYPTION_KEYFILE=str(keyfile))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Incomplete encryption configuration", result.stderr)
+        self.assertFalse(self.calls.exists())
 
 
 if __name__ == "__main__":

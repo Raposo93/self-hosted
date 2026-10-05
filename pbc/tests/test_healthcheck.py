@@ -3,11 +3,12 @@
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[1] / "pbc_backup_data.sh"
+SCRIPT = Path(__file__).resolve().parents[1] / "pbc_backup_data.py"
 
 
 class HealthcheckTests(unittest.TestCase):
@@ -55,7 +56,7 @@ class HealthcheckTests(unittest.TestCase):
 
     def run_backup(self, **settings):
         return subprocess.run(
-            ["bash", str(SCRIPT)],
+            [sys.executable, str(SCRIPT)],
             env=self.environment | settings,
             capture_output=True,
             text=True,
@@ -97,6 +98,39 @@ class HealthcheckTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0)
         self.assertEqual(self.log.read_text().count("Warning: Healthcheck"), 2)
+
+    def test_failed_pre_hook_sends_only_failure_ping(self):
+        hook = self.base / "pre.sh"
+        hook.write_text("#!/bin/sh\nexit 12\n")
+        hook.chmod(0o755)
+        url = "https://example.test/private"
+        result = self.run_backup(PRE_BACKUP_HOOK=str(hook), HEALTHCHECK_URL=url)
+        self.assertEqual(result.returncode, 12)
+        events = self.read_events()
+        self.assertEqual([event[0] for event in events], ["curl"])
+        self.assertEqual(events[0][1][-1], url + "/fail")
+
+    def test_configuration_error_sends_failure_ping_without_start(self):
+        url = "https://example.test/private"
+        result = self.run_backup(BACKUP_ID="", HEALTHCHECK_URL=url)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("BACKUP_ID", result.stderr)
+        events = self.read_events()
+        self.assertEqual([event[0] for event in events], ["curl"])
+        self.assertEqual(events[0][1][-1], url + "/fail")
+        self.assertIn("Configuration error: BACKUP_ID", self.log.read_text())
+
+    def test_failed_post_hook_changes_final_ping_to_failure(self):
+        hook = self.base / "post.sh"
+        hook.write_text("#!/bin/sh\nexit 17\n")
+        hook.chmod(0o755)
+        url = "https://example.test/private"
+        result = self.run_backup(POST_BACKUP_HOOK=str(hook), HEALTHCHECK_URL=url)
+        self.assertEqual(result.returncode, 17)
+        events = self.read_events()
+        self.assertEqual([event[0] for event in events], ["curl", "backup", "curl"])
+        self.assertEqual(events[0][1][-1], url + "/start")
+        self.assertEqual(events[2][1][-1], url + "/fail")
 
 
 if __name__ == "__main__":

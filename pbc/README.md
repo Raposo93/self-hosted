@@ -8,7 +8,8 @@ Each backup profile uses its own environment file and can be scheduled with a sy
 
 | File | Purpose |
 | --- | --- |
-| `pbc_backup_data.sh` | Runs the backup |
+| `pbc_backup_data.py` | Runs the backup and reports its overall result |
+| `pbc_backup_data.sh` | Compatibility launcher for existing manual calls |
 | `.env.example` | Example profile configuration |
 | `pbc-backup@.service.example` | systemd service template |
 | `pbc-backup-daily@.timer.example` | Fixed daily schedule |
@@ -18,7 +19,8 @@ Each backup profile uses its own environment file and can be scheduled with a sy
 ## Requirements
 
 * Proxmox Backup Client
-* `realpath` (coreutils); `findmnt` (util-linux) when mount checks or included mounts are configured
+* Python 3.10 or newer
+* `findmnt` (util-linux) when mount checks or included mounts are configured
 * Access to a Proxmox Backup Server datastore
 * PBS user or API token with backup permissions
 * `systemd-creds`
@@ -187,7 +189,12 @@ sudo cp pbc-backup@.service.example \
   /etc/systemd/system/pbc-backup@.service
 ```
 
-Replace `/path/to/self-hosted/pbc` with the real repository path.
+Replace `/path/to/self-hosted/pbc` with the real repository path. An installed
+service using the old Bash `ExecStart` can continue through the small launcher,
+but update the installed unit to invoke `pbc_backup_data.py` as shown, then run
+`systemctl daemon-reload`. The `.env.<profile>` files and encrypted systemd
+credentials do not change. The next scheduled run uses the updated service
+after the reload.
 
 Reload systemd:
 
@@ -222,8 +229,10 @@ journalctl -u pbc-backup@example-profile.service
 Set `HEALTHCHECK_URL` in a private profile file to a Healthchecks-compatible
 ping URL, for example `https://monitor.example.com/ping/your-private-id`.
 Immediately before PBC starts, the script sends a ping to `<url>/start`.
-After PBC and any post-hook finish, it pings `<url>` on PBC success or
-`<url>/fail` on PBC failure or cancellation.
+After PBC and any post-hook finish, it pings `<url>` only when the entire run
+succeeds or `<url>/fail` if preparation, PBC, cleanup, or validation fails or
+the run is cancelled. A failed pre-hook sends a failure ping even though PBC
+was not started; there is no start ping in that case.
 The monitoring service must be configured with an expected period and grace
 time matching the profile's timer to detect missed runs. No requests are sent
 when the URL is unset or empty. These pings complement the existing email
@@ -241,14 +250,30 @@ Keep the dump and hook scripts outside Git if they contain private data or
 credentials. Hook output and exit codes go to `LOGFILE` and the existing email.
 
 The pre-hook runs before PBC. If it fails, PBC and the post-hook do not run;
-the service fails and sends a failure email. After a successful pre-hook (or
-when no pre-hook is configured), the post-hook runs after the PBC attempt even
-if PBC fails. A configured hook that is missing or not executable fails the
-run before preparation or backup starts. If PBC and the post-hook both fail,
-the service returns the PBC exit code while logging both failures. If only
-the post-hook fails, the service returns its exit code. Healthcheck pings
-describe the PBC attempt; a pre-hook failure sends no ping, and post-hook
-failure does not change the PBC outcome ping. Email reports the overall run.
+the service fails and sends a failure email and, when configured, a failure
+ping. A partially completed pre-hook must handle its own rollback. After a
+successful pre-hook (or when none is configured), the post-hook runs after the
+PBC attempt even if PBC fails. A configured hook that is missing or not
+executable fails the run before preparation or backup starts and is reported
+as a configuration error. If PBC and the post-hook both fail, the service
+returns the PBC exit code and reports both failures. If only the post-hook
+fails, the service returns its exit code and the final healthcheck ping fails.
+
+The subject and exit status describe the whole run:
+
+| Result | Email subject prefix | Final ping | Exit status |
+| --- | --- | --- | --- |
+| All phases succeed | `[OK] Backup completed:` | Success | `0` |
+| PBC succeeds; post-hook fails | `[WARN] Backup completed; post-hook failed:` | Failure | Post-hook code |
+| PBC fails | `[ERROR] Backup failed:` | Failure | PBC code |
+| Pre-hook fails before PBC | `[ERROR] Backup not started; pre-hook failed:` | Failure | Pre-hook code |
+| Cancelled | `[ERROR] Backup cancelled:` | Failure | `130` or `143` |
+| Invalid configuration | `[ERROR] Backup not started; configuration error:` | Failure | Non-zero |
+
+The subject continues with `<archive> on <host>`. The email body records which
+phases ran, their exit codes, and the overall exit code. Monitor and mail
+failures are logged as warnings; they do not override the backup result or
+prevent the post-hook from running.
 
 On SIGTERM or SIGINT during a backup, the script requests client termination,
 waits for it to exit, and then runs the post-hook once if the pre-hook succeeded.
@@ -315,10 +340,10 @@ The script:
 * uses PBS credentials loaded by the systemd service
 * runs `proxmox-backup-client backup`
 * optionally runs preparation and cleanup hooks around PBC
-* optionally reports backup start and outcome to a healthcheck endpoint
+* optionally reports backup start and the overall run result to a healthcheck endpoint
 * writes the configured log file
 * sends an email notification
-* exits with the backup status, or a hook failure status when no backup failed
+* exits with the cancellation, pre-hook, backup, or post-hook status in that order
 
 ## Security
 

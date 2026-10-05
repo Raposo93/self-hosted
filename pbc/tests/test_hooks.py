@@ -3,12 +3,13 @@
 import os
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[1] / "pbc_backup_data.sh"
+SCRIPT = Path(__file__).resolve().parents[1] / "pbc_backup_data.py"
 
 
 class HookTests(unittest.TestCase):
@@ -20,8 +21,8 @@ class HookTests(unittest.TestCase):
         binaries.mkdir()
         for name, body in {
             "proxmox-backup-client": 'printf "backup\\n" >> "$EVENTS"\nexit "${BACKUP_STATUS:-0}"\n',
-            "curl": 'printf "health\\n" >> "$EVENTS"\n',
-            "msmtp": 'cat > "$MAIL"\n',
+            "curl": 'printf "health\\n" >> "$EVENTS"\nexit "${CURL_STATUS:-0}"\n',
+            "msmtp": 'cat > "$MAIL"\nexit "${MAIL_STATUS:-0}"\n',
         }.items():
             path = binaries / name
             path.write_text("#!/usr/bin/env bash\n" + body)
@@ -56,14 +57,16 @@ class HookTests(unittest.TestCase):
 
     def run_backup(self, **settings):
         return subprocess.run(
-            ["bash", str(SCRIPT)],
+            [sys.executable, str(SCRIPT)],
             env=self.environment | settings,
             capture_output=True,
             text=True,
             check=False,
         )
 
-    def run_cancelled_backup(self, *, post_status="0", repeat_signal=False):
+    def run_cancelled_backup(
+        self, *, post_status="0", repeat_signal=False, signum=signal.SIGTERM
+    ):
         client = self.base / "bin" / "proxmox-backup-client"
         client.write_text(
             "#!/usr/bin/env bash\n"
@@ -72,7 +75,7 @@ class HookTests(unittest.TestCase):
             "while :; do sleep 0.05; done\n"
         )
         process = subprocess.Popen(
-            ["bash", str(SCRIPT)],
+            [sys.executable, str(SCRIPT)],
             env=self.environment | {"POST_STATUS": post_status},
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -92,9 +95,12 @@ class HookTests(unittest.TestCase):
                 time.sleep(0.01)
             else:
                 self.fail("Backup did not start")
-            os.killpg(process.pid, signal.SIGTERM)
+            if signum == signal.SIGTERM:
+                os.killpg(process.pid, signum)
+            else:
+                os.kill(process.pid, signum)
             if repeat_signal:
-                os.kill(process.pid, signal.SIGTERM)
+                os.kill(process.pid, signum)
             stdout, stderr = process.communicate(timeout=5)
             return process.returncode, stdout, stderr
         finally:
@@ -110,16 +116,21 @@ class HookTests(unittest.TestCase):
         )
         self.assertIn("Pre-backup hook exit code: 0", self.log.read_text())
         self.assertIn("Post-backup hook exit code: 0", self.log.read_text())
+        self.assertIn("Subject: [OK] Backup completed:", self.mail.read_text())
 
     def test_failed_pre_hook_skips_backup_and_post_hook(self):
         result = self.run_backup(
             PRE_STATUS="12", HEALTHCHECK_URL="https://example.test/id"
         )
         self.assertEqual(result.returncode, 12)
-        self.assertEqual(self.events.read_text().splitlines(), ["pre"])
+        self.assertEqual(self.events.read_text().splitlines(), ["pre", "health"])
         self.assertIn("Backup not started", self.log.read_text())
         self.assertIn("Pre-backup hook exit code: 12", self.mail.read_text())
-        self.assertIn("Backup failed", self.mail.read_text())
+        self.assertIn(
+            "Subject: [ERROR] Backup not started; pre-hook failed:",
+            self.mail.read_text(),
+        )
+        self.assertIn("Healthcheck fail reported", self.mail.read_text())
 
     def test_post_hook_runs_after_failed_backup(self):
         result = self.run_backup(BACKUP_STATUS="23")
@@ -128,20 +139,31 @@ class HookTests(unittest.TestCase):
             self.events.read_text().splitlines(), ["pre", "backup", "post"]
         )
         self.assertIn("Backup exit code: 23", self.mail.read_text())
+        self.assertIn("Subject: [ERROR] Backup failed:", self.mail.read_text())
 
     def test_both_failures_are_logged_and_backup_status_is_returned(self):
         result = self.run_backup(BACKUP_STATUS="23", POST_STATUS="17")
         self.assertEqual(result.returncode, 23)
         self.assertIn("Backup exit code: 23", self.mail.read_text())
         self.assertIn("Post-backup hook exit code: 17", self.mail.read_text())
+        self.assertIn("Subject: [ERROR] Backup failed:", self.mail.read_text())
 
     def test_post_hook_failure_fails_successful_backup_run(self):
-        result = self.run_backup(POST_STATUS="17")
+        result = self.run_backup(
+            POST_STATUS="17", HEALTHCHECK_URL="https://example.test/id"
+        )
         self.assertEqual(result.returncode, 17)
         self.assertEqual(
-            self.events.read_text().splitlines(), ["pre", "backup", "post"]
+            self.events.read_text().splitlines(),
+            ["pre", "health", "backup", "post", "health"],
         )
-        self.assertIn("Backup failed", self.mail.read_text())
+        self.assertIn(
+            "Subject: [WARN] Backup completed; post-hook failed:",
+            self.mail.read_text(),
+        )
+        self.assertIn("Healthcheck fail reported", self.mail.read_text())
+        self.assertIn("Backup exit code: 0", self.mail.read_text())
+        self.assertIn("Post-backup hook exit code: 17", self.mail.read_text())
 
     def test_nonexecutable_post_hook_fails_before_preparation(self):
         result = self.run_backup(POST_BACKUP_HOOK=str(self.base / "missing.sh"))
@@ -150,6 +172,8 @@ class HookTests(unittest.TestCase):
         self.assertIn(
             "Post-backup hook is not an executable file", self.mail.read_text()
         )
+        self.assertIn("configuration error", self.mail.read_text())
+        self.assertNotIn("pre-hook failed", self.mail.read_text())
 
     def test_sigterm_waits_for_client_then_runs_post_hook_once(self):
         status, _, stderr = self.run_cancelled_backup(repeat_signal=True)
@@ -159,7 +183,7 @@ class HookTests(unittest.TestCase):
             ["pre", "backup", "client-exit", "post"],
         )
         self.assertIn("Backup cancelled by SIGTERM", self.log.read_text())
-        self.assertIn("Backup failed", self.mail.read_text())
+        self.assertIn("Subject: [ERROR] Backup cancelled:", self.mail.read_text())
         self.assertNotIn("Backup completed", self.mail.read_text())
 
     def test_post_hook_failure_after_sigterm_remains_failure(self):
@@ -167,7 +191,70 @@ class HookTests(unittest.TestCase):
         self.assertEqual(status, 143, stderr)
         self.assertEqual(self.events.read_text().splitlines()[-1], "post")
         self.assertIn("Post-backup hook exit code: 17", self.mail.read_text())
-        self.assertIn("Backup failed", self.mail.read_text())
+        self.assertIn("Subject: [ERROR] Backup cancelled:", self.mail.read_text())
+
+    def test_sigint_waits_for_client_and_runs_post_hook_once(self):
+        status, _, stderr = self.run_cancelled_backup(signum=signal.SIGINT)
+        self.assertEqual(status, 130, stderr)
+        self.assertEqual(
+            self.events.read_text().splitlines(),
+            ["pre", "backup", "client-exit", "post"],
+        )
+        self.assertIn("Backup cancelled by SIGINT", self.log.read_text())
+
+    def test_cancellation_during_successful_pre_hook_still_runs_cleanup(self):
+        pre_hook = self.base / "pre hook.sh"
+        pre_hook.write_text(
+            "#!/usr/bin/env bash\n"
+            'printf "pre-start\\n" >> "$EVENTS"\n'
+            "sleep 0.2\n"
+            'printf "pre\\n" >> "$EVENTS"\n'
+        )
+        process = subprocess.Popen(
+            [sys.executable, str(SCRIPT)],
+            env=self.environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                if self.events.exists() and "pre-start" in self.events.read_text():
+                    break
+                time.sleep(0.01)
+            else:
+                self.fail("Pre-hook did not start")
+            os.kill(process.pid, signal.SIGTERM)
+            _, stderr = process.communicate(timeout=5)
+            self.assertEqual(process.returncode, 143, stderr)
+            self.assertEqual(
+                self.events.read_text().splitlines(), ["pre-start", "pre", "post"]
+            )
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.communicate(timeout=5)
+
+    def test_notification_failures_preserve_backup_error_and_cleanup(self):
+        result = self.run_backup(
+            BACKUP_STATUS="23",
+            POST_STATUS="17",
+            CURL_STATUS="7",
+            MAIL_STATUS="9",
+            HEALTHCHECK_URL="https://example.test/id",
+        )
+        self.assertEqual(result.returncode, 23)
+        self.assertEqual(
+            self.events.read_text().splitlines(),
+            ["pre", "health", "backup", "post", "health"],
+        )
+        self.assertIn(
+            "Warning: Failed to send notification email", self.log.read_text()
+        )
+        self.assertEqual(self.log.read_text().count("Warning: Healthcheck"), 2)
+        self.assertIn("Overall exit code: 23", self.log.read_text())
 
 
 if __name__ == "__main__":

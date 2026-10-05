@@ -3,11 +3,12 @@
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[1] / "pbc_backup_data.sh"
+SCRIPT = Path(__file__).resolve().parents[1] / "pbc_backup_data.py"
 
 
 class MountTests(unittest.TestCase):
@@ -62,7 +63,7 @@ class MountTests(unittest.TestCase):
     def run_backup(self, **settings):
         environment = self.environment | settings
         return subprocess.run(
-            ["bash", str(SCRIPT)],
+            [sys.executable, str(SCRIPT)],
             env=environment,
             capture_output=True,
             text=True,
@@ -78,6 +79,13 @@ class MountTests(unittest.TestCase):
 
     def test_local_directory_needs_no_mount(self):
         self.assertEqual(self.run_backup().returncode, 0)
+
+    def test_source_argument_keeps_configured_symlink(self):
+        alias = self.base / "source alias"
+        alias.symlink_to(self.source, target_is_directory=True)
+        result = self.run_backup(SOURCE_DIR=str(alias))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(self.calls.read_text())[1], f"data.pxar:{alias}")
 
     def test_residual_directory_does_not_count_as_mount(self):
         self.assert_rejected(
