@@ -37,8 +37,8 @@ mode http
 
 acl acme-challenge path_beg /.well-known/acme-challenge/
 
-use_backend acme_backend if acme-challenge
 redirect scheme https code 301 if !acme-challenge
+use_backend acme_backend if acme-challenge
 
 frontend https-in
 bind *:443 ssl crt /etc/haproxy/certs/acme
