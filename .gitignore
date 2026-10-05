@@ -34,6 +34,7 @@ wikijs/db-data/
 
 # App-generated local config
 filebrowser/filebrowser_config/
+filebrowser/filebrowser_database/
 qBittorrent-nox/config/
 qBittorrent-nox/downloads/
 qBittorrent-nox/torrents/

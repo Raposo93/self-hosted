@@ -9,5 +9,6 @@ services:
     volumes:
       - ${DATA_DIR}:/srv
       - ./filebrowser_config:/config
+      - ./filebrowser_database:/database
     environment:
       - FB_BASEURL=/
