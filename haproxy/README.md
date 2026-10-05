@@ -157,6 +157,19 @@ routes names through the map, and keeps HTTP-01 requests on port 80. It contains
 service. Edit backend addresses for your services; each backend named in the
 map must exist. HAProxy serves 404 for unknown hostnames.
 
+This example assumes clients connect directly to HAProxy. On its TLS-only
+frontend, HAProxy replaces any client-supplied `X-Forwarded-For` with the IP
+it observes (`src`) and `X-Forwarded-Proto` with `https`. It removes the
+client-supplied `Forwarded` and `X-Real-IP` alternatives. Configure each
+application to trust these proxy headers only from its HAProxy peer address or
+the smallest network containing the HAProxy instances. Do not trust arbitrary
+clients or all private networks. Keep a local backend on loopback where
+possible; firewall a remote backend so only HAProxy can reach it. If an
+application uses additional identity or scheme headers, remove or set them
+explicitly too. With another proxy in front, `src` would be that proxy and
+the transport seen here may differ from the client's; define and validate a
+separate trusted-hop policy before using that topology.
+
 ```bash
 sudo install -m 0644 haproxy/haproxy.cfg.example \
   /etc/haproxy/haproxy.cfg.https-candidate
@@ -235,3 +248,15 @@ certificates into production.
   HAProxy binary or usable Docker daemon, and no public test hostname was
   configured. Complete the disposable-host run above before treating the
   bootstrap path as end-to-end verified.
+
+### Forwarded-header verification (2026-10-05)
+
+* A disposable HAProxy 3.2.9 instance passed `haproxy -c` using this example
+  with temporary bind ports, certificate, host map, backend addresses, and
+  host-specific paths.
+* An echo backend received `X-Forwarded-For: 127.0.0.1` and
+  `X-Forwarded-Proto: https` over TLS despite forged client values; the forged
+  `Forwarded` and `X-Real-IP` headers were absent.
+* HTTP still returned a 301 HTTPS redirect, while the ACME challenge path
+  reached its HTTP backend. This local test did not change a live deployment
+  or verify public certificate issuance.

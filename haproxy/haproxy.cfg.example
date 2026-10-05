@@ -44,6 +44,12 @@ frontend https-in
 bind *:443 ssl crt /etc/haproxy/certs/acme
 mode http
 
+# Clients connect directly to this TLS frontend; never trust their proxy headers.
+http-request del-header Forwarded
+http-request del-header X-Real-IP
+http-request set-header X-Forwarded-For %[src]
+http-request set-header X-Forwarded-Proto https
+
 use_backend %[req.hdr(host),lower,map(/etc/haproxy/maps/hosts.map,unknown_backend)]
 
 backend example_backend
