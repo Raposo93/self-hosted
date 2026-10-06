@@ -5,6 +5,9 @@ After=network-online.target
 
 [Service]
 Type=oneshot
+TimeoutStartSec=1h
+TimeoutStopSec=10s
+KillMode=control-group
 WorkingDirectory=/path/to/self-hosted/acme_haproxy
 Environment=HOME=/path/to/acme-user-home
 ExecStart=/usr/bin/python3 /path/to/self-hosted/acme_haproxy/acme_haproxy.py renew

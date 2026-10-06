@@ -6,9 +6,11 @@ import json
 import logging
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -28,6 +30,47 @@ ACME_WEBROOT = Path("/var/www/acme-challenges")
 PENDING_STATE = Path("/etc/haproxy/certs/acme/.acme-haproxy-pending.json")
 
 
+ACME_TIMEOUT = 600
+INSTALL_TIMEOUT = 60
+VALIDATE_TIMEOUT = 30
+RELOAD_TIMEOUT = 60
+LOCK_TIMEOUT = 30
+
+
+def _run_command(
+    command: list[str], *, timeout: float, check: bool
+) -> subprocess.CompletedProcess[str]:
+    # A separate group lets us stop descendants before releasing the operation lock.
+    with subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    ) as process:
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except BaseException as error:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.communicate()
+            if isinstance(error, subprocess.TimeoutExpired):
+                raise subprocess.TimeoutExpired(command, timeout) from error
+            raise
+        result = subprocess.CompletedProcess(
+            command, process.returncode, stdout, stderr
+        )
+        if check:
+            result.check_returncode()
+        return result
+
+
+def _cancel_operation(_signum: int, _frame: object) -> None:
+    raise SystemExit(143)
+
+
 class LockFailure(RuntimeError):
     pass
 
@@ -45,13 +88,27 @@ def operation_lock() -> Iterator[None]:
     with os.fdopen(fd, "r+") as stream:
         log.info("Waiting for ACME operation lock at %s", path)
         try:
-            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+            deadline = time.monotonic() + LOCK_TIMEOUT
+            while True:
+                try:
+                    fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise LockFailure(
+                            f"ACME operation lock busy after {LOCK_TIMEOUT}s; retry later"
+                        ) from None
+                    time.sleep(min(0.1, max(0, deadline - time.monotonic())))
         except OSError as error:
             raise LockFailure(
                 f"Cannot acquire ACME operation lock at {path}: {error}"
             ) from error
         log.info("Acquired ACME operation lock")
-        yield
+        previous_handler = signal.signal(signal.SIGTERM, _cancel_operation)
+        try:
+            yield
+        finally:
+            signal.signal(signal.SIGTERM, previous_handler)
 
 
 class PendingState:
@@ -89,8 +146,29 @@ class PendingState:
             Path(name).unlink(missing_ok=True)
 
 
+def _positive_seconds(value: str) -> int:
+    seconds = int(value)
+    if seconds <= 0:
+        raise argparse.ArgumentTypeError("timeout must be positive")
+    return seconds
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Manage ACME certificates for HAProxy")
+
+    for option, default in (
+        ("acme-timeout", ACME_TIMEOUT),
+        ("install-timeout", INSTALL_TIMEOUT),
+        ("validate-timeout", VALIDATE_TIMEOUT),
+        ("reload-timeout", RELOAD_TIMEOUT),
+        ("lock-timeout", LOCK_TIMEOUT),
+    ):
+        parser.add_argument(
+            f"--{option}",
+            type=_positive_seconds,
+            default=default,
+            help=f"Time limit in seconds (default: {default})",
+        )
 
     subparsers = parser.add_subparsers(
         dest="command",
@@ -127,11 +205,10 @@ def _get_certificate_paths(home: Path, domain: str) -> dict[str, Path]:
 
 
 def _renew_certificate(acme_sh: Path, domain: str) -> bool:
-    result = subprocess.run(
+    result = _run_command(
         [str(acme_sh), "--renew", "-d", domain, "--ecc"],
+        timeout=ACME_TIMEOUT,
         check=False,
-        capture_output=True,
-        text=True,
     )
 
     if result.returncode == 2:
@@ -163,7 +240,7 @@ def _install_certificate(
     fullchain: Path,
     keyfile: Path,
 ) -> None:
-    result = subprocess.run(
+    result = _run_command(
         [
             str(acme_sh),
             "--install-cert",
@@ -175,9 +252,8 @@ def _install_certificate(
             "--key-file",
             str(keyfile),
         ],
+        timeout=INSTALL_TIMEOUT,
         check=True,
-        capture_output=True,
-        text=True,
     )
 
     if result.stdout:
@@ -248,16 +324,15 @@ def _restore_pem(cert_dest: Path) -> None:
 
 
 def _validate_haproxy_config() -> None:
-    result = subprocess.run(
+    result = _run_command(
         [
             "haproxy",
             "-c",
             "-f",
             str(HAPROXY_CONFIG),
         ],
+        timeout=VALIDATE_TIMEOUT,
         check=True,
-        capture_output=True,
-        text=True,
     )
 
     log.info("HAProxy configuration validated successfully.")
@@ -270,11 +345,10 @@ def _validate_haproxy_config() -> None:
 
 
 def _reload_haproxy() -> None:
-    result = subprocess.run(
+    result = _run_command(
         ["systemctl", "reload", "haproxy"],
+        timeout=RELOAD_TIMEOUT,
         check=True,
-        capture_output=True,
-        text=True,
     )
 
     log.info("HAProxy reloaded successfully.")
@@ -306,7 +380,7 @@ def _deploy_certificate(
             paths["keyfile"],
             paths["cert_dest"],
         )
-    except (OSError, subprocess.CalledProcessError) as e:
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
         log.error("Certificate deployment failed for %s: %s", domain, e)
         raise
     log.info("Certificate deployed for %s", domain)
@@ -351,7 +425,7 @@ def _issue_certificate(
     acme_sh: Path,
     domain: str,
 ) -> None:
-    result = subprocess.run(
+    result = _run_command(
         [
             str(acme_sh),
             "--issue",
@@ -361,9 +435,8 @@ def _issue_certificate(
             str(ACME_WEBROOT),
             "--ecc",
         ],
+        timeout=ACME_TIMEOUT,
         check=True,
-        capture_output=True,
-        text=True,
     )
 
     log.info(f"Issued certificate for {domain}")
@@ -418,7 +491,12 @@ def _renew_all_locked() -> int:
             _deploy_certificate(acme_sh, home, domain)
             state.set(domain, "validate")
 
-        except (RuntimeError, subprocess.CalledProcessError, OSError) as e:
+        except (
+            RuntimeError,
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+            OSError,
+        ) as e:
             log.error(f"Failed to process {domain}: {e}")
             had_errors = True
 
@@ -439,7 +517,7 @@ def _finish_pending(state: PendingState, home: Path) -> bool:
 
     try:
         _validate_haproxy_config()
-    except (OSError, subprocess.CalledProcessError) as e:
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
         log.error("HAProxy validation failed: %s", e)
         for domain in ready:
             try:
@@ -456,7 +534,7 @@ def _finish_pending(state: PendingState, home: Path) -> bool:
             if phase == "validate":
                 state.set(domain, "reload")
         _reload_haproxy()
-    except (OSError, subprocess.CalledProcessError) as e:
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
         log.error("HAProxy reload failed: %s", e)
         return True
 
@@ -514,7 +592,7 @@ def _issue_locked(domain: str) -> int:
         )
         return 1
 
-    except OSError as e:
+    except (OSError, subprocess.TimeoutExpired) as e:
         log.error(f"Failed to issue or deploy {domain}: {e}")
         return 1
 
@@ -522,7 +600,13 @@ def _issue_locked(domain: str) -> int:
 
 
 def main() -> int:
+    global ACME_TIMEOUT, INSTALL_TIMEOUT, VALIDATE_TIMEOUT, RELOAD_TIMEOUT, LOCK_TIMEOUT
     args = _parse_args()
+    ACME_TIMEOUT = args.acme_timeout
+    INSTALL_TIMEOUT = args.install_timeout
+    VALIDATE_TIMEOUT = args.validate_timeout
+    RELOAD_TIMEOUT = args.reload_timeout
+    LOCK_TIMEOUT = args.lock_timeout
 
     if args.command == "renew":
         return renew_all()

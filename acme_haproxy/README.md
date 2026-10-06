@@ -47,12 +47,50 @@ A domain must exist in the map before a certificate can be issued for it.
 
 `issue` and `renew` share an exclusive file lock at
 `/etc/haproxy/certs/acme/.acme-haproxy.lock`. A second invocation, including a
-manual command while the service runs, waits for the first to finish. It then
+manual command while the service runs, waits up to 30 seconds for the first to
+finish, then exits non-zero with a retry message if still busy. After acquiring
+the lock it
 reads the latest pending state before doing any certificate work. The lock file
 remains on disk; the operating system releases the lock when the process exits,
 including after an error. Do not delete the lock file while an operation runs.
 If the lock cannot be opened or acquired, the command reports an error and exits
 non-zero.
+
+## Time limits
+
+External commands have finite limits: issuance/renewal 600 seconds per domain,
+installation 60 seconds per domain, validation 30 seconds, and reload 60 seconds.
+Override them with positive integer options **before** the subcommand:
+
+```bash
+sudo HOME=/path/to/acme-user-home python3 acme_haproxy.py \
+  --acme-timeout 900 --install-timeout 90 --validate-timeout 45 \
+  --reload-timeout 90 --lock-timeout 10 renew
+```
+
+Timeouts fail the operation and preserve pending work. A validation timeout
+restores previous PEMs just like a validation error; a reload timeout leaves
+`reload` pending and retains the previous PEM backup. A timed-out issuance can
+be retried with `issue`; `renew` also reconciles certificates written before an
+interrupted command finished. No successful validation or reload is recorded
+until its command exits successfully.
+
+On command timeout, SIGTERM, or Ctrl+C, the helper kills the external command's
+process group (including ordinary descendants) and waits for its direct child
+before releasing the lock. Commands must not detach into another session.
+The service also uses `KillMode=control-group` to stop all processes in its
+cgroup, with `TimeoutStopSec=10s` as the final cleanup bound. Killing the
+`systemctl` client cannot undo a reload job already submitted to systemd;
+inspect HAProxy status after a reload timeout and retry pending work.
+
+The service template sets `TimeoutStartSec=1h` as a global bound. Adjust it in
+the installed unit for the number of domains: allow at least
+`lock timeout + N × (ACME timeout + install timeout) + validation timeout + reload timeout`,
+plus time for filesystem work. With defaults, five domains need 3420 seconds
+plus that margin; larger maps need a longer global limit. Add overridden
+command options to `ExecStart` and reload systemd after editing the unit.
+A global stop may interrupt any phase; inspect the journal and run `renew`
+after correcting the cause to resume the recorded pending work.
 
 ## Commands
 

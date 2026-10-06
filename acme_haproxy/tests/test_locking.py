@@ -28,6 +28,7 @@ root = Path(os.environ['FAKE_ROOT'])
 role = os.environ['ROLE']
 acme.PENDING_STATE = root / '.pending.json'
 acme.HAPROXY_HOSTS_MAP = root / 'hosts.map'
+acme.LOCK_TIMEOUT = float(os.environ.get('LOCK_TIMEOUT', '30'))
 
 def record(event):
     with (root / 'events').open('a') as output:
@@ -94,12 +95,13 @@ class LockingTests(unittest.TestCase):
         self.processes = []
         self.addCleanup(self.stop_processes)
 
-    def start(self, role, action="renew", fail_reload=""):
+    def start(self, role, action="renew", fail_reload="", lock_timeout="30"):
         process = subprocess.Popen(
             [sys.executable, "-c", DRIVER, str(SCRIPT)],
             env=os.environ
             | {
                 "FAKE_ROOT": str(self.root),
+                "LOCK_TIMEOUT": lock_timeout,
                 "ROLE": role,
                 "ACTION": action,
                 "FAIL_RELOAD": fail_reload,
@@ -134,6 +136,17 @@ class LockingTests(unittest.TestCase):
         stdout, stderr = process.communicate(timeout=5)
         self.assertFalse(stderr, stderr)
         return process.returncode, stdout
+
+    def test_busy_lock_exits_within_limit(self):
+        first = self.start("A")
+        self.wait_for("holding-A")
+        second = self.start("B", lock_timeout="0.2")
+        code, output = self.result(second)
+        self.assertEqual(code, 1)
+        self.assertIn("retry later", output)
+        self.assertNotIn("load-B", self.events_so_far())
+        (self.root / "release").touch()
+        self.assertEqual(self.result(first)[0], 0)
 
     def test_waiting_renew_reads_pending_reload_and_retries_it(self):
         first = self.start("A", fail_reload="A,B")

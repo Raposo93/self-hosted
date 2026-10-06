@@ -48,6 +48,39 @@ class RenewalTests(unittest.TestCase):
             "cert_dest": self.pem,
         }
 
+    def test_timeouts_keep_recoverable_phases(self):
+        for operation, phase in (
+            ("_renew_certificate", "renew"),
+            ("_install_certificate", "deploy"),
+            ("_validate_haproxy_config", "deploy"),
+            ("_reload_haproxy", "reload"),
+        ):
+            with self.subTest(operation=operation):
+                acme.PENDING_STATE.unlink(missing_ok=True)
+                self.pem.write_bytes(b"old certificate\nold private key\n")
+                with mock.patch.object(acme, "_renew_certificate", return_value=True):
+                    with mock.patch.object(
+                        acme,
+                        operation,
+                        side_effect=subprocess.TimeoutExpired("fake", 1),
+                    ):
+                        self.assertEqual(acme.renew_all(), 1)
+                    self.assertEqual(acme.PendingState().phases, {"example.com": phase})
+                    if operation == "_validate_haproxy_config":
+                        self.assertEqual(
+                            self.pem.read_bytes(), b"old certificate\nold private key\n"
+                        )
+                    self.assertEqual(acme.renew_all(), 0)
+
+    def test_issue_timeout_returns_failure(self):
+        with mock.patch.object(
+            acme,
+            "_issue_certificate",
+            side_effect=subprocess.TimeoutExpired("fake", 1),
+        ):
+            self.assertEqual(acme.issue("example.com"), 1)
+        acme._install_certificate.assert_not_called()
+
     def test_failed_install_is_retried_without_renewing_again(self):
         with mock.patch.object(acme, "_renew_certificate", return_value=True) as renew:
             with mock.patch.object(
