@@ -290,9 +290,15 @@ def run_client(
     config: Config, result: Result, cancellation: Cancellation, stream: TextIO
 ) -> None:
     result.backup_attempted = True
+    environment = os.environ.copy()
+    # NAMESPACE is the only namespace setting, including an empty root.
+    environment.pop("PBS_NAMESPACE", None)
     try:
         cancellation.client = subprocess.Popen(
-            client_command(config), stdout=stream, stderr=subprocess.STDOUT
+            client_command(config),
+            env=environment,
+            stdout=stream,
+            stderr=subprocess.STDOUT,
         )
     except FileNotFoundError:
         log(stream, "Command not found: proxmox-backup-client")

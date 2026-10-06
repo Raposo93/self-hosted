@@ -159,10 +159,10 @@ class RestoreTests(unittest.TestCase):
     def test_namespace_selection_and_no_root_fallback(self):
         for name, configured, inherited, expected in [
             ("omitted", None, None, ""),
-            ("omitted-with-client-default", None, "other", ""),
-            ("empty", "", "other", ""),
+            ("omitted-with-client-default", None, "photos", ""),
+            ("empty", "", "photos", ""),
             ("configured", "photos", None, "photos"),
-            ("conflict", "photos", "other", "photos"),
+            ("conflict", "documents", "photos", "documents"),
         ]:
             with self.subTest(name=name), tempfile.TemporaryDirectory() as base:
                 environment = {
@@ -170,6 +170,9 @@ class RestoreTests(unittest.TestCase):
                     "RESTORE_GROUP": "host/same",
                     "BACKUP_NAME": "data.pxar",
                     "RESTORE_TMP_BASE": base,
+                    "PBS_PASSWORD": "fake password",
+                    "PBS_FINGERPRINT": "fake fingerprint",
+                    "CREDENTIALS_DIRECTORY": base,
                 }
                 if configured is not None:
                     environment["NAMESPACE"] = configured
@@ -177,7 +180,19 @@ class RestoreTests(unittest.TestCase):
                     environment["PBS_NAMESPACE"] = inherited
                 calls = []
 
-                def fake_client(arguments, calls=calls, expected=expected):
+                def fake_run(
+                    arguments,
+                    calls=calls,
+                    expected=expected,
+                    environment=environment,
+                    **kwargs,
+                ):
+                    received = kwargs["env"]
+                    self.assertNotIn("PBS_NAMESPACE", received)
+                    for key, value in environment.items():
+                        if key != "PBS_NAMESPACE":
+                            self.assertEqual(received[key], value)
+                    arguments = arguments[1:]
                     calls.append(arguments)
                     selected = (
                         arguments[arguments.index("--ns") + 1]
@@ -186,25 +201,29 @@ class RestoreTests(unittest.TestCase):
                     )
                     self.assertEqual(selected, expected)
                     if arguments[0] == "snapshot":
-                        return json.dumps(
-                            [
-                                {
-                                    "backup-type": "host",
-                                    "backup-id": "same",
-                                    "backup-time": 100,
-                                }
-                            ]
+                        return subprocess.CompletedProcess(
+                            arguments,
+                            0,
+                            stdout=json.dumps(
+                                [
+                                    {
+                                        "backup-type": "host",
+                                        "backup-id": "same",
+                                        "backup-time": 100,
+                                    }
+                                ]
+                            ),
                         )
                     target = Path(arguments[3])
                     target.mkdir()
                     (target / ".pbc-restore-sentinel").write_text(
                         "pbc-restore-sentinel-v1\n"
                     )
-                    return ""
+                    return subprocess.CompletedProcess(arguments, 0, stdout="")
 
                 with (
                     patch.dict(os.environ, environment, clear=True),
-                    patch.object(checker, "client", side_effect=fake_client),
+                    patch.object(checker.subprocess, "run", side_effect=fake_run),
                     patch.object(checker.time, "time", return_value=200),
                 ):
                     result = checker.verify()

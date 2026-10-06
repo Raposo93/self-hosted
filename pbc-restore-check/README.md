@@ -30,8 +30,8 @@ Different profiles can use the same archive name and sentinel content safely
 when their backup IDs/restore groups or namespaces are distinct. The checker
 passes a configured namespace to both `snapshot list` and `restore`; a missing
 snapshot in that namespace fails without trying the datastore root. If
-`NAMESPACE` is omitted or empty, it selects the root namespace. The checker
-ignores an inherited `PBS_NAMESPACE` in all cases, so `NAMESPACE` is the only
+`NAMESPACE` is omitted or empty, it selects the root namespace. Both backup
+and verification ignore an inherited `PBS_NAMESPACE` in all cases, so `NAMESPACE` is the only
 namespace setting for this profile and takes precedence when both are set.
 See the
 [backup profile transition](../pbc/README.md#transition-for-existing-profiles)

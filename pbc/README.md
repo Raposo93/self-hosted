@@ -63,8 +63,13 @@ does **not** isolate profiles from each other.
 Set `NAMESPACE` only if this profile should back up into a PBS datastore
 namespace. For example, `NAMESPACE="application-backups"` passes
 `--ns application-backups` to the client. Leaving it unset or empty uses the
-datastore's default namespace, as before. Create the namespace and grant the
-token access to it in PBS before using this option.
+datastore's root namespace. Both backup and
+[restore verification](../pbc-restore-check/README.md) ignore inherited
+`PBS_NAMESPACE`, so `NAMESPACE` is the only namespace setting. Other client
+authentication and configuration environment variables remain available.
+If an existing deployment relied on `PBS_NAMESPACE`, set `NAMESPACE` explicitly
+in its backup and verification profiles before updating. Create the namespace
+and grant the token access to it in PBS before using this option.
 
 ### Mounted sources and included mounts
 

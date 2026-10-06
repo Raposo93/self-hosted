@@ -24,6 +24,8 @@ class BackupIdTests(unittest.TestCase):
             "import json, os, sys\n"
             "with open(os.environ['CLIENT_CALLS'], 'a') as stream:\n"
             "    stream.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+            "with open(os.environ['CLIENT_ENV'], 'a') as stream:\n"
+            "    stream.write(json.dumps(dict(os.environ)) + '\\n')\n"
         )
         client.chmod(0o755)
         mail = binaries / "msmtp"
@@ -35,6 +37,7 @@ class BackupIdTests(unittest.TestCase):
         self.environment = {
             "PATH": str(binaries) + os.pathsep + os.environ["PATH"],
             "CLIENT_CALLS": str(self.calls),
+            "CLIENT_ENV": str(self.base / "environment.jsonl"),
             "LOGFILE": str(self.base / "backup.log"),
             "SOURCE_DIR": str(source),
             "REPO": "fake-repository",
@@ -91,6 +94,38 @@ class BackupIdTests(unittest.TestCase):
         self.assertNotIn("--ns", calls[0])
         self.assertNotIn("--ns", calls[1])
         self.assertEqual(calls[2][calls[2].index("--ns") + 1], "team backups")
+
+    def test_inherited_namespace_is_ignored_and_other_client_settings_survive(self):
+        settings = {
+            "PBS_NAMESPACE": "photos",
+            "PBS_PASSWORD": "fake password",
+            "PBS_FINGERPRINT": "fake fingerprint",
+            "PBS_REPOSITORY": "fake repository",
+            "PBS_ENCRYPTION_PASSWORD": "fake encryption password",
+            "CREDENTIALS_DIRECTORY": str(self.base / "credentials"),
+        }
+        for namespace in (None, "", "documents"):
+            with self.subTest(namespace=namespace):
+                result = self.run_backup(namespace=namespace, **settings)
+                self.assertEqual(result.returncode, 0, result.stderr)
+        calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
+        environments = [
+            json.loads(line)
+            for line in (self.base / "environment.jsonl").read_text().splitlines()
+        ]
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(len(environments), 3)
+        for call, environment, namespace in zip(
+            calls, environments, (None, "", "documents"), strict=True
+        ):
+            self.assertNotIn("PBS_NAMESPACE", environment)
+            for key, value in (self.environment | settings).items():
+                if key != "PBS_NAMESPACE":
+                    self.assertEqual(environment[key], value)
+            if namespace:
+                self.assertEqual(call[call.index("--ns") + 1], namespace)
+            else:
+                self.assertNotIn("--ns", call)
 
     def test_encryption_key_and_systemd_credential_are_preserved(self):
         credentials = self.base / "credentials"
