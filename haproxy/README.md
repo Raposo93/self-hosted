@@ -239,15 +239,26 @@ service and timer work. Destroy the test host afterwards. Use a fresh ACME
 home with the production CA for a real deployment; do not carry staging
 certificates into production.
 
-### Verification record (2026-09-30)
+### Verification record (2026-10-06)
 
 * `./check.sh` passed, including the ACME helper tests and systemd unit verification.
 * The challenge unit separately passed `systemd-analyze verify`.
-* A public HTTP-01 challenge, staging issuance, and the HTTPS transition have
-  **not** been exercised on a disposable host. The validation machine has no
-  HAProxy binary or usable Docker daemon, and no public test hostname was
-  configured. Complete the disposable-host run above before treating the
-  bootstrap path as end-to-end verified.
+* The bootstrap path was exercised on a fresh Debian 13 unprivileged LXC with
+  an initially empty HAProxy certificate directory.
+* The local challenge service ran under systemd on `127.0.0.1:8888`, while
+  HAProxy exposed the HTTP bootstrap frontend on port 80.
+* The HTTP-01 challenge path was verified through HAProxy, and Let's Encrypt
+  successfully issued the first certificate. No separate external `curl`
+  check was performed; successful issuance confirmed public HTTP-01 reachability.
+* The generated PEM was loaded by HAProxy, the HTTPS candidate passed
+  `haproxy -c`, and HAProxy reloaded successfully with listeners on ports
+  80 and 443 while the challenge service remained local on port 8888.
+* A temporary backend on `127.0.0.1:8080` returned HTTP 200 through the
+  HTTPS frontend and host map, validating TLS termination and backend routing.
+* `acme-haproxy.service` completed successfully and correctly skipped the
+  certificate because renewal was not due.
+* `acme-haproxy.timer` was enabled and active, with the next daily renewal
+  run scheduled by systemd.
 
 ### Forwarded-header verification (2026-10-05)
 
