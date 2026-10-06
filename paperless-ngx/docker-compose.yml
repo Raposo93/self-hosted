@@ -16,7 +16,7 @@ services:
       - ${PAPERLESS_DB_DIR}:/var/lib/postgresql/data
 
   paperless-webserver:
-    image: ghcr.io/paperless-ngx/paperless-ngx:2.20.6
+    image: ghcr.io/paperless-ngx/paperless-ngx:2.20.15
     restart: unless-stopped
     depends_on:
       - paperless-db
