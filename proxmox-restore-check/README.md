@@ -1,8 +1,8 @@
 # Proxmox restore check
 
 Restores the latest PBS snapshot of each configured VM (`vm`) or container (`ct`)
-sequentially on a **dedicated standalone Proxmox VE test node**. It checks running
-state and optionally QEMU Guest Agent ping for VMs, or `/bin/true` through
+sequentially on a **dedicated standalone Proxmox VE test node**, after checking
+the configured maximum snapshot age. It checks running state and optionally QEMU Guest Agent ping for VMs, or `/bin/true` through
 `pct exec` for containers. It stops and destroys each temporary guest, sends one
 plain-text summary through `../mail-notifier/send-mail.sh`, then optionally
 powers off. This measures a real restore and basic boot, not application health,
@@ -91,14 +91,43 @@ always-on host should send Wake-on-LAN monthly using its own systemd timer;
 this component owns neither WoL nor a timer. Verify firmware/NIC WoL and ability
 to wake after poweroff independently.
 
+## Snapshot age policy
+
+`max_snapshot_age_seconds` sets an optional global maximum age in seconds.
+A guest's `max_snapshot_age_seconds` overrides it; omitted or `null` inherits
+the global value. Positive integers enable the limit, and `0` explicitly
+disables it, including for one guest when the global limit is enabled.
+The global default is `0`, so existing configurations retain unlimited age.
+The example enables seven days globally and two days for its VM; adapt these
+values to the backup schedule and recovery requirements of each machine.
+Negative values, booleans, fractions, and strings are rejected.
+
+Dates are parsed as real UTC calendar timestamps from matching PBS volume IDs.
+Malformed matching dates fail selection instead of silently choosing an older
+backup. The selected backup is compared with the current UTC time immediately
+before restoration. An age exactly equal to the limit is accepted; a greater
+age fails before restore, startup, or temporary guest creation. No older copy
+is substituted. The report records the selected volume (including its UTC
+date), age in seconds, and applied limit, and the guest contributes FAIL to
+the summary and non-zero exit status. Other guests can still be tested.
+
+`future_tolerance_seconds` is a global non-negative integer, default `300`.
+Dates up to that many seconds ahead are accepted for small clock differences;
+a date further ahead fails even if the age limit is disabled. The report uses
+a negative age for dates in the future. Keep the test host clock synchronized.
+
+An acceptable age only establishes freshness under this policy. Successful
+restoration and the basic boot check remain separate results; neither proves
+application health or data integrity.
+
 ## Results, failures and recovery
 
 The journal/stdout and single email include source ID/name, selected backup
-timestamp, restore/boot duration on success, health check result, removed options,
-CPU reductions, failure reason and cleanup outcome. A CPU reduction alone is
+timestamp, age and applied limit, restore/boot duration on success, health check
+result, removed options, CPU reductions, failure reason and cleanup outcome. A CPU reduction alone is
 not a failure. Totals distinguish OK, WARN, FAIL and SKIP.
 Each latest backup is chosen by UTC timestamp from PVE's JSON PBS volume list.
-No backup age limit or application checks are implied.
+The configured age policy is enforced; application checks are not performed.
 
 One guest failure continues to the next only after safe cleanup. CLI timeouts
 kill the CLI process group before cleanup. Failed cleanup stops further restores

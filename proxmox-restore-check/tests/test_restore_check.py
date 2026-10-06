@@ -78,10 +78,15 @@ class RestoreTests(unittest.TestCase):
         host_vcpus=4,
         max_test_vcpus=None,
         expected_cpu=None,
+        max_age=0,
+        guest_max_age=None,
+        stamp="2026-01-01T00:00:00Z",
     ):
         cfg = self.config()
         cfg.max_test_vcpus = max_test_vcpus
+        cfg.max_snapshot_age_seconds = max_age
         guest = cfg.guests[0 if kind == "vm" else 1]
+        guest.max_snapshot_age_seconds = guest_max_age
         calls = []
         with tempfile.TemporaryDirectory() as tmp:
             runner = rc.Runner(cfg)
@@ -95,11 +100,7 @@ class RestoreTests(unittest.TestCase):
                 calls.append(args)
                 if args[:2] == ["pvesh", "get"]:
                     return json.dumps(
-                        [
-                            {
-                                "volid": f"pbs:backup/{kind}/{guest.source_id}/2026-01-01T00:00:00Z"
-                            }
-                        ]
+                        [{"volid": f"pbs:backup/{kind}/{guest.source_id}/{stamp}"}]
                     )
                 if args[:2] == ["pvesm", "extractconfig"]:
                     return (
@@ -132,9 +133,133 @@ class RestoreTests(unittest.TestCase):
             with (
                 patch.object(rc, "command", side_effect=fake),
                 patch.object(rc, "host_cpu_capacity", return_value=host_vcpus),
+                patch.object(rc.time, "time", return_value=1767312000),
             ):
                 result = runner.test(guest)
         return result, calls
+
+    def test_age_policy_before_restore_and_in_report(self):
+        for kind in ("vm", "ct"):
+            for limit, override, stamp, expected in (
+                (86401, None, "2026-01-01T00:00:00Z", "OK"),
+                (86400, None, "2026-01-01T00:00:00Z", "OK"),
+                (86399, None, "2026-01-01T00:00:00Z", "FAIL"),
+                (86399, 86400, "2026-01-01T00:00:00Z", "OK"),
+                (86401, 86399, "2026-01-01T00:00:00Z", "FAIL"),
+                (1, 0, "2020-01-01T00:00:00Z", "OK"),
+                (0, None, "2020-01-01T00:00:00Z", "OK"),
+                (0, None, "2026-01-02T00:05:00Z", "OK"),
+                (0, None, "2026-01-02T00:05:01Z", "FAIL"),
+            ):
+                with self.subTest(
+                    kind=kind, limit=limit, override=override, stamp=stamp
+                ):
+                    result, calls = self.exercise(
+                        kind=kind,
+                        max_age=limit,
+                        guest_max_age=override,
+                        stamp=stamp,
+                    )
+                    self.assertEqual(result[0], expected)
+                    self.assertTrue(result[2])
+                    self.assertIn(f"Backup: pbs:backup/{kind}/", result[1])
+                    self.assertIn(stamp, result[1])
+                    self.assertIn("Snapshot age:", result[1])
+                    applied = limit if override is None else override
+                    self.assertIn(
+                        f"limit: {str(applied) + 's' if applied else 'disabled'}",
+                        result[1],
+                    )
+                    if stamp == "2026-01-01T00:00:00Z":
+                        self.assertIn("Snapshot age: 86400.0s", result[1])
+                    restores = [
+                        a
+                        for a in calls
+                        if a[0] == "qmrestore" or a[:2] == ["pct", "restore"]
+                    ]
+                    self.assertEqual(bool(restores), expected == "OK")
+                    if expected == "FAIL":
+                        self.assertEqual(len(calls), 1)
+
+    def test_invalid_matching_backup_dates_are_rejected(self):
+        for stamp in ("2026-02-30T00:00:00Z", "2026-01-01T25:00:00Z", "not-a-date"):
+            with self.subTest(stamp=stamp):
+                result, calls = self.exercise(stamp=stamp)
+                self.assertEqual(result[0], "FAIL")
+                self.assertIn("Invalid backup UTC date", result[1])
+                self.assertIn(stamp, result[1])
+                self.assertEqual(len(calls), 1)
+        rows = [
+            {"volid": "pbs:backup/vm/100/2026-01-01T00:00:00Z"},
+            {"volid": "pbs:backup/vm/100/2026-02-30T00:00:00Z"},
+        ]
+        with self.assertRaises(rc.Failure):
+            rc.latest_backup(json.dumps(rows), "pbs", self.config().guests[0])
+
+    def test_age_failure_affects_summary_and_exit(self):
+        cfg = self.config()
+        cfg.guests = cfg.guests[:1]
+        cfg.max_snapshot_age_seconds = 1
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            volume = "pbs:backup/vm/100/2026-01-01T00:00:00Z"
+            with (
+                patch.object(rc.Runner, "preflight"),
+                patch.object(
+                    rc.Runner, "paths", return_value=[base / "vm", base / "ct"]
+                ),
+                patch.object(rc.time, "time", return_value=1767312000),
+                patch.object(
+                    rc, "command", side_effect=[json.dumps([{"volid": volume}]), ""]
+                ) as command,
+            ):
+                self.assertEqual(rc.run(cfg, True), 1)
+            report = command.call_args.args[2]
+            self.assertIn("FAIL=1", report)
+            self.assertIn("Backup too old", report)
+            self.assertIn("86400.0s; limit: 1s", report)
+            self.assertIn(volume, report)
+            self.assertEqual(command.call_count, 2)
+
+    def test_config_age_validation_and_legacy_defaults(self):
+        example = Path(__file__).resolve().parents[1] / "config.example.json"
+        original = json.loads(example.read_text())
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            for field in (
+                "max_snapshot_age_seconds",
+                "future_tolerance_seconds",
+                "guest",
+            ):
+                for invalid in (-1, True, 1.5, "60", None):
+                    if field == "guest" and invalid is None:
+                        continue
+                    data = json.loads(json.dumps(original))
+                    if field == "guest":
+                        data["guests"][0]["max_snapshot_age_seconds"] = invalid
+                    else:
+                        data[field] = invalid
+                    path.write_text(json.dumps(data))
+                    with self.assertRaisesRegex(
+                        ValueError, "snapshot_age|future_tolerance"
+                    ):
+                        rc.load_config(path)
+            original.pop("max_snapshot_age_seconds")
+            original.pop("future_tolerance_seconds")
+            original["guests"][0].pop("max_snapshot_age_seconds")
+            path.write_text(json.dumps(original))
+            cfg = rc.load_config(path)
+            self.assertEqual(cfg.max_snapshot_age_seconds, 0)
+            self.assertEqual(cfg.future_tolerance_seconds, 300)
+            self.assertIsNone(cfg.guests[0].max_snapshot_age_seconds)
+            cfg.future_tolerance_seconds = 0
+            with (
+                patch.object(rc.time, "time", return_value=1767312000),
+                self.assertRaisesRegex(rc.Failure, "future"),
+            ):
+                rc.check_backup_age(
+                    "pbs:backup/vm/100/2026-01-02T00:00:01Z", cfg, cfg.guests[0]
+                )
 
     def test_vm_and_ct_isolated_before_start_and_cleaned(self):
         for kind in ("vm", "ct"):

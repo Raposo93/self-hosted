@@ -6,9 +6,11 @@
   "mail_to": "operator@example.com",
   "restore_timeout": 3600,
   "max_test_vcpus": 4,
+  "max_snapshot_age_seconds": 604800,
+  "future_tolerance_seconds": 300,
   "poweroff": false,
   "guests": [
-    {"kind": "vm", "source_id": 100, "name": "example-vm", "agent": true, "boot_timeout": 180},
+    {"kind": "vm", "source_id": 100, "name": "example-vm", "agent": true, "boot_timeout": 180, "max_snapshot_age_seconds": 172800},
     {"kind": "ct", "source_id": 101, "name": "example-container", "boot_timeout": 120}
   ]
 }

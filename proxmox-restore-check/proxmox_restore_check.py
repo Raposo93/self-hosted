@@ -12,6 +12,7 @@ import subprocess
 import time
 from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -95,6 +96,7 @@ class Guest:
     name: str
     agent: bool = False
     boot_timeout: int = 180
+    max_snapshot_age_seconds: int | None = None
 
 
 @dataclass
@@ -108,6 +110,8 @@ class Config:
     restore_timeout: int = 3600
     poweroff: bool = False
     max_test_vcpus: int | None = None
+    max_snapshot_age_seconds: int = 0
+    future_tolerance_seconds: int = 300
 
 
 def load_config(path: Path) -> Config:
@@ -129,6 +133,10 @@ def load_config(path: Path) -> Config:
         type(config.max_test_vcpus) is not int or config.max_test_vcpus <= 0
     ):
         raise ValueError("Invalid max_test_vcpus")
+    for name in ("max_snapshot_age_seconds", "future_tolerance_seconds"):
+        value = getattr(config, name)
+        if type(value) is not int or value < 0:
+            raise ValueError(f"Invalid {name}: expected a non-negative integer")
     if not config.mail_to or any(c in config.mail_to for c in "\r\n"):
         raise ValueError("Invalid mail recipient")
     for guest in config.guests:
@@ -145,7 +153,24 @@ def load_config(path: Path) -> Config:
             or guest.boot_timeout <= 0
         ):
             raise ValueError("Invalid guest check/timeout")
+        if guest.max_snapshot_age_seconds is not None and (
+            type(guest.max_snapshot_age_seconds) is not int
+            or guest.max_snapshot_age_seconds < 0
+        ):
+            raise ValueError("Invalid guest max_snapshot_age_seconds")
     return config
+
+
+def backup_date(volume: str) -> datetime:
+    stamp = volume.split("/", 3)[-1]
+    try:
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", stamp):
+            raise ValueError("Invalid UTC timestamp format")
+        return datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc
+        )
+    except ValueError:
+        raise Failure(f"Invalid backup UTC date: {volume}") from None
 
 
 def latest_backup(output: str, storage: str, guest: Guest) -> str:
@@ -153,15 +178,31 @@ def latest_backup(output: str, storage: str, guest: Guest) -> str:
     volumes = [
         row["volid"]
         for row in json.loads(output)
-        if isinstance(row.get("volid"), str)
-        and row["volid"].startswith(prefix)
-        and re.fullmatch(
-            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", row["volid"][len(prefix) :]
-        )
+        if isinstance(row.get("volid"), str) and row["volid"].startswith(prefix)
     ]
     if not volumes:
         raise Failure("No matching PBS backup")
-    return max(volumes)
+    # Reject malformed matching dates rather than silently restoring an older copy.
+    return max(volumes, key=backup_date)
+
+
+def check_backup_age(volume: str, config: Config, guest: Guest) -> str:
+    stamp = backup_date(volume)
+    age = time.time() - stamp.timestamp()
+    limit = (
+        config.max_snapshot_age_seconds
+        if guest.max_snapshot_age_seconds is None
+        else guest.max_snapshot_age_seconds
+    )
+    details = (
+        f"Snapshot age: {age:.1f}s; limit: {str(limit) + 's' if limit else 'disabled'}; "
+        f"future tolerance: {config.future_tolerance_seconds}s"
+    )
+    if age < -config.future_tolerance_seconds:
+        raise Failure(f"Backup date is in the future: {details}")
+    if limit and age > limit:
+        raise Failure(f"Backup too old: {details}")
+    return details
 
 
 def sanitize(
@@ -353,6 +394,7 @@ class Runner:
                 guest,
             )
             details.append(f"Backup: {volume}")
+            details.append(check_backup_age(volume, cfg, guest))
             if guest.kind == "ct":
                 original = command(["pvesm", "extractconfig", volume])
                 for line in original.splitlines():
