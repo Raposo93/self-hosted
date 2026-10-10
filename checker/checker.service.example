@@ -1,0 +1,14 @@
+[Unit]
+Description=Check security updates, reboot requirements and disk usage
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/path/to/self-hosted/checker
+ExecStart=/bin/bash /path/to/self-hosted/checker/run.sh
+StateDirectory=self-hosted-checker
+StateDirectoryMode=0700
+UMask=0077
+TimeoutStartSec=45min

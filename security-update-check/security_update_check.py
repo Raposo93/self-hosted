@@ -126,7 +126,7 @@ def send_notification(state: str, body: str, hostname: str) -> None:
     subprocess.run(command, input=body, text=True, check=True, timeout=120)
 
 
-def main() -> int:
+def main(notification: Callable[[str, str, str], None] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--no-refresh", action="store_true", help="use existing APT lists"
@@ -164,18 +164,21 @@ def main() -> int:
             if line.startswith("btime ")
         )
         reboot = reboot_reasons(apt_pkg.version_compare, platform.release(), boot_time)
-        hostname = platform.node()
+        hostname = os.environ.get("HOST_NAME") or platform.node()
         state, body = report(hostname, updates, reboot)
         if args.dry_run:
             print(body)
         elif updates or reboot:
             print(body, flush=True)
-            send_notification(state, body, hostname)
+            (notification or send_notification)(state, body, hostname)
+        elif notification is not None:
+            notification(state, body, hostname)
         return 0
     except (
         ImportError,
         OSError,
         ValueError,
+        TypeError,
         SystemError,
         StopIteration,
         subprocess.SubprocessError,

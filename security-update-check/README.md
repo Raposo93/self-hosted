@@ -40,6 +40,10 @@ Normal successful `OK` runs print nothing and send no email. While attention
 remains necessary, each daily run sends one email containing the hostname,
 package versions and reboot reasons. No state file or suppression cache is used.
 
+For a single daily timer combining security and disk/inode checks with
+change-only notifications, use [checker](../checker/README.md). The standalone
+interface below remains supported; disable its timer when migrating.
+
 ## Installation and configuration
 
 Supported baseline: Debian 11+, Ubuntu 22.04+, or Proxmox based on these releases,

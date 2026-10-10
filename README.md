@@ -34,6 +34,7 @@ This repository contains Docker Compose setups, system configuration examples an
 
 | Path | Purpose |
 | --- | --- |
+| `checker/` | Unified daily security/reboot and disk/inode checks |
 | `http-endpoint-monitor/` | HTTP endpoint monitoring and alerts |
 | `mail-notifier/` | Shared email notification helper |
 | `mikrotik-report/` | Docker Compose deployment for MikroTik blocking reports |

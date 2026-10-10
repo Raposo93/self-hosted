@@ -125,6 +125,9 @@ if ((${#PYTHON_SCRIPTS[@]} > 0)); then
     if [[ -d mikrotik-report/tests ]]; then
         "$PROJECT_PYTHON" -m unittest discover -s mikrotik-report/tests -v
     fi
+    if [[ -d checker/tests ]]; then
+        "$PROJECT_PYTHON" -m unittest discover -s checker/tests -v
+    fi
     if [[ -d security-update-check/tests ]]; then
         "$PROJECT_PYTHON" -m unittest discover -s security-update-check/tests -v
     fi
