@@ -20,6 +20,7 @@ This repository contains Docker Compose setups, system configuration examples an
 | `qBittorrent-nox/` | qBittorrent-nox deployment |
 | `vikunja/` | Vikunja deployment and helper scripts |
 | `wikijs/` | Wiki.js deployment |
+| `wordpress/` | WordPress and MariaDB deployment |
 
 ### Infrastructure
 

@@ -31,6 +31,8 @@ paperless-ngx/originals/
 vikunja/db/
 vikunja/files/
 wikijs/db-data/
+wordpress/db/
+wordpress/html/
 
 # App-generated local config
 filebrowser/filebrowser_config/
