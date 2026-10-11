@@ -116,6 +116,31 @@ class RebootTests(unittest.TestCase):
 
 
 class ExecutionTests(unittest.TestCase):
+    def test_unavailable_apt_bindings_fail_before_refresh_or_mail(self):
+        for missing in ("apt", "apt_pkg"):
+            imports = (
+                [NS(), ModuleNotFoundError("fixture")]
+                if missing == "apt_pkg"
+                else [ModuleNotFoundError("fixture")]
+            )
+            with (
+                self.subTest(missing=missing),
+                patch.object(sys, "argv", ["check"]),
+                patch.dict(os.environ, {"RECIPIENT_EMAIL": "test@example.com"}),
+                patch.object(
+                    monitor.importlib,
+                    "import_module",
+                    side_effect=imports,
+                ),
+                patch.object(monitor.subprocess, "run") as run,
+                patch.object(monitor, "send_notification") as send,
+                contextlib.redirect_stderr(io.StringIO()) as errors,
+            ):
+                self.assertEqual(monitor.main(), 1)
+                self.assertIn("sudo apt-get install python3-apt", errors.getvalue())
+                run.assert_not_called()
+                send.assert_not_called()
+
     def run_main(
         self,
         updates=(),

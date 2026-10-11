@@ -138,8 +138,17 @@ def main(notification: Callable[[str, str, str], None] | None = None) -> int:
     try:
         if not args.dry_run and not os.environ.get("RECIPIENT_EMAIL", "").strip():
             raise ValueError("RECIPIENT_EMAIL is required for notifications")
-        apt = importlib.import_module("apt")
-        apt_pkg = importlib.import_module("apt_pkg")
+        try:
+            apt = importlib.import_module("apt")
+            apt_pkg = importlib.import_module("apt_pkg")
+        except ImportError:
+            print(
+                "APT Python bindings unavailable; install them with: "
+                "sudo apt-get install python3-apt; "
+                "run this check with /usr/bin/python3.",
+                file=sys.stderr,
+            )
+            return 1
         if not args.no_refresh:
             subprocess.run(
                 ["apt-get", "-o", "APT::Update::Error-Mode=any", "update"],

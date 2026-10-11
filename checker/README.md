@@ -17,11 +17,20 @@ On the target host, install dependencies and configure the root msmtp account
 as described in the notifier README, then:
 
 ```bash
+sudo apt-get install python3 python3-apt msmtp ca-certificates
 cp checker/.env.example checker/.env
 chmod 600 checker/.env
 # Edit checker/.env before installing.
 sudo ./checker/install.sh
 ```
+
+On minimal Debian installations (including Debian 13), `apt` can work while
+the optional `python3-apt` bindings are absent. `apt-get update` refreshes package
+indexes but does not install these bindings. If installation or a security check
+reports unavailable APT Python bindings, install `python3-apt` with the command
+above and verify using `/usr/bin/python3 -c 'import apt, apt_pkg'`, then retry.
+Use the distribution Python; installing a package with pip is not a substitute.
+`install.sh` validates dependencies but does not install packages automatically.
 
 The checkout and `.env` must be writable only by trusted administrators: `.env`
 is sourced as Bash by a root process. Installation validates configuration and

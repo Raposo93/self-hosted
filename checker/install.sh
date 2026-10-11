@@ -19,7 +19,10 @@ export SEND_MAIL="${SEND_MAIL:-$DIRECTORY/../mail-notifier/send-mail.sh}"
 export HOST_NAME="${HOST_NAME:-$(hostname)}"
 /usr/bin/python3 "$DIRECTORY/checks/config.py"
 if [[ "$CHECK_SECURITY_UPDATES" == true ]]; then
-    /usr/bin/python3 -c 'import apt, apt_pkg'
+    if ! /usr/bin/python3 -c 'import apt, apt_pkg' 2>/dev/null; then
+        echo 'APT Python bindings unavailable in /usr/bin/python3; install them with: sudo apt-get install python3-apt' >&2
+        exit 1
+    fi
     command -v apt-get >/dev/null
 fi
 TEMPORARY="$(mktemp -d)"
